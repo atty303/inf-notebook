@@ -1346,8 +1346,10 @@ class ScoreSelection():
         self.difficulty = difficulty
 
 def mainloop():
+    import platform
     while not event_close.wait(timeout=1):
-        if not newwindow.is_shown():
+        # Skip window state check on Linux since xdg-open doesn't allow window control
+        if platform.system() != 'Linux' and not newwindow.is_shown():
             return
         if not queue_result_screen.empty():
             result_process(queue_result_screen.get_nowait())
@@ -2043,7 +2045,6 @@ if __name__ == '__main__':
     newwindow.set_port(setting.port['main'])
     newwindow.set_public(True)
 
-
     api = GuiApi(newwindow, notebooks_music)
     api_export = GuiApiExport(newwindow)
     api_discordwebhook = GuiApiDiscordWebhook(newwindow)
@@ -2058,8 +2059,8 @@ if __name__ == '__main__':
         if handle:
             break
         time.sleep(0.1)
-    
     if handle is None:
+        logger.error('Application window not found')
         platform_service.show_error_dialog('起動に失敗しました。', windowtitle)
         exit()
     

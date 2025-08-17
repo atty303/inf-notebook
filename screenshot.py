@@ -9,7 +9,6 @@ import define
 logger_child_name = 'screenshot'
 
 logger = getLogger().getChild(logger_child_name)
-logger.debug('loaded screenshot.py')
 
 from define import define
 from resources import load_resource_serialized
@@ -89,6 +88,7 @@ class Screenshot:
             # For Linux without OBS, set default position
             if platform.system() == 'Linux':
                 self.xy = (0, 0)
+        
 
     def __del__(self):
         for screen, pos, capture, value in self.checkscreens:
