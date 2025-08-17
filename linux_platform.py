@@ -101,3 +101,21 @@ class LinuxPlatformService(PlatformService):
         """Linux doesn't support game detection - OBS only"""
         logger.info('Game detection not available on Linux - using OBS capture only')
         return None
+    
+    def register_hotkeys(self, hotkey_config: dict, callbacks: dict) -> bool:
+        """Register Linux global hotkeys - may fail due to permissions"""
+        try:
+            import keyboard
+            
+            for hotkey_name, hotkey_key in hotkey_config.items():
+                if hotkey_key and hotkey_name in callbacks:
+                    keyboard.add_hotkey(hotkey_key, callbacks[hotkey_name])
+            
+            logger.info('Hotkeys registered successfully on Linux')
+            return True
+        except PermissionError:
+            logger.info('Hotkeys disabled on Linux due to permission requirements')
+            return False
+        except Exception as ex:
+            logger.warning(f'Failed to register hotkeys on Linux: {ex}')
+            return False

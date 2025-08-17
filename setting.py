@@ -325,7 +325,15 @@ class Setting():
     def obs_websocket(self):
         '''OBS WebSocket設定
         '''
-        return self.get_value('obs_websocket')
+        config = self.get_value('obs_websocket').copy()
+        
+        # Override password from environment variable if available
+        import os
+        env_password = os.environ.get('OBS_WEBSOCKET_PASSWORD')
+        if env_password:
+            config['password'] = env_password
+            
+        return config
     
     @obs_websocket.setter
     def obs_websocket(self, value):

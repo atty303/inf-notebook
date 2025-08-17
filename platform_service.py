@@ -85,3 +85,8 @@ class PlatformService(ABC):
     def create_game_detector(self) -> Optional[GameDetector]:
         """Create game detector for window management. Returns None if not supported (OBS-only)."""
         pass
+    
+    @abstractmethod
+    def register_hotkeys(self, hotkey_config: dict, callbacks: dict) -> bool:
+        """Register global hotkeys. Returns True if successful, False if not supported."""
+        pass

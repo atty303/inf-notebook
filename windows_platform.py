@@ -186,3 +186,17 @@ class WindowsPlatformService(PlatformService):
     def create_game_detector(self) -> Optional[GameDetector]:
         """Create Windows game detector"""
         return WindowsGameDetector()
+    
+    def register_hotkeys(self, hotkey_config: dict, callbacks: dict) -> bool:
+        """Register Windows global hotkeys using keyboard library"""
+        try:
+            import keyboard
+            
+            for hotkey_name, hotkey_key in hotkey_config.items():
+                if hotkey_key and hotkey_name in callbacks:
+                    keyboard.add_hotkey(hotkey_key, callbacks[hotkey_name])
+            
+            return True
+        except Exception as ex:
+            logger.error(f'Failed to register hotkeys: {ex}')
+            return False

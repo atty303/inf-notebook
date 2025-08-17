@@ -1957,20 +1957,18 @@ def start_hotkeys():
     if setting.hotkeys is None:
         return
     
-    if 'active_screenshot' in setting.hotkeys.keys() and setting.hotkeys['active_screenshot'] != '':
-        keyboard.add_hotkey(setting.hotkeys['active_screenshot'], active_screenshot)
-    if 'select_summary' in setting.hotkeys.keys() and setting.hotkeys['select_summary'] != '':
-        keyboard.add_hotkey(setting.hotkeys['select_summary'], select_summary)
-    if 'select_notesradar' in setting.hotkeys.keys() and setting.hotkeys['select_notesradar'] != '':
-        keyboard.add_hotkey(setting.hotkeys['select_notesradar'], select_notesradar)
-    if 'select_screenshot' in setting.hotkeys.keys() and setting.hotkeys['select_screenshot'] != '':
-        keyboard.add_hotkey(setting.hotkeys['select_screenshot'], select_screenshot)
-    if 'select_scoreinformation' in setting.hotkeys.keys() and setting.hotkeys['select_scoreinformation'] != '':
-        keyboard.add_hotkey(setting.hotkeys['select_scoreinformation'], select_scoreinformation)
-    if 'select_scoregraph' in setting.hotkeys.keys() and setting.hotkeys['select_scoregraph'] != '':
-        keyboard.add_hotkey(setting.hotkeys['select_scoregraph'], select_scoregraph)
-    if 'upload_musicselect' in setting.hotkeys.keys() and setting.hotkeys['upload_musicselect'] != '':
-        keyboard.add_hotkey(setting.hotkeys['upload_musicselect'], upload_musicselect)
+    # Use platform service to register hotkeys
+    hotkey_callbacks = {
+        'active_screenshot': active_screenshot,
+        'select_summary': select_summary,
+        'select_notesradar': select_notesradar,
+        'select_screenshot': select_screenshot,
+        'select_scoreinformation': select_scoreinformation,
+        'select_scoregraph': select_scoregraph,
+        'upload_musicselect': upload_musicselect
+    }
+    
+    platform_service.register_hotkeys(setting.hotkeys, hotkey_callbacks)
 
 def stop_hotkeys():
     for target in [active_screenshot, upload_musicselect, select_summary, select_notesradar, select_screenshot, select_scoreinformation, select_scoregraph]:
