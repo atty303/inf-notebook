@@ -1,6 +1,4 @@
 import numpy as np
-import base64
-import io
 from PIL import Image
 from logging import getLogger
 
@@ -39,19 +37,19 @@ class OBSCapture:
         self.password = password
     
     def shot(self, left, top):
+        import os
+        import platform
+        import uuid
+        from pathlib import Path
         
         # Connect on first use if not already connected
         if not self.connected and obs_available:
-            logger.info(f'Attempting OBS WebSocket connection to {self.host}:{self.port}')
             try:
                 self.ws = obsws(self.host, self.port, self.password)
                 self.ws.connect()
                 self.connected = True
-                logger.info(f'Successfully connected to OBS WebSocket at {self.host}:{self.port}')
-                logger.info(f'Using OBS source: {self.source_name}')
             except Exception as e:
                 logger.error(f'Failed to connect to OBS WebSocket: {e}')
-                logger.info('Make sure OBS is running with WebSocket server enabled')
                 return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
         
         if not self.connected or not self.ws:
@@ -59,41 +57,63 @@ class OBSCapture:
             return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
         
         try:
-            # For OBS, get full screen via Base64 and crop the region we need
-            response = self.ws.call(requests.GetSourceScreenshot(
+            # IMPORTANT: Using file save API instead of Base64 transfer
+            # Base64 transfer takes ~0.8-0.9 seconds which is too slow for real-time capture
+            # File save is much faster as it avoids Base64 encoding/decoding overhead
+            
+            # Create temporary file path using XDG cache on Linux or temp dir on Windows
+            # This ensures compatibility with Flatpak OBS which has different /tmp sandbox
+            if platform.system() == 'Linux':
+                # Use XDG_CACHE_HOME or fallback to ~/.cache
+                cache_dir = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache'))
+                cache_dir = cache_dir / 'inf-notebook'
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                temp_path = str(cache_dir / f'obs_capture_{uuid.uuid4().hex}.png')
+            else:
+                # Windows: use user's temp directory
+                import tempfile
+                temp_dir = Path(tempfile.gettempdir())
+                temp_path = str(temp_dir / f'obs_capture_{uuid.uuid4().hex}.png')
+            
+            # Save screenshot to file
+            response = self.ws.call(requests.SaveSourceScreenshot(
                 sourceName=self.source_name,
-                imageFormat='png'
-                # Don't specify width/height to get full source size
+                imageFormat='png',
+                imageFilePath=temp_path
             ))
             
             # Check if request was successful
             if hasattr(response, 'requestStatus') and not response.requestStatus.get('result', True):
                 status = response.requestStatus
                 logger.error(f'OBS request failed: code={status.get("code")}, comment={status.get("comment")}')
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
                 return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
             
-            # Get image data from response
-            try:
-                image_data = response.getImageData()
-                if not image_data:
-                    logger.error(f'Empty imageData in OBS response for source: {self.source_name}')
-                    return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
-            except (KeyError, AttributeError) as e:
-                logger.error(f'No imageData in OBS response for source: {self.source_name} - {e}')
+            # Read image from file
+            # Check if file exists and has content
+            if not os.path.exists(temp_path):
+                logger.error(f'Screenshot file not created at: {temp_path}')
                 return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
             
-            # Don't log image data length to avoid huge logs
+            file_size = os.path.getsize(temp_path)
+            if file_size == 0:
+                logger.error(f'Screenshot file is empty at: {temp_path}')
+                os.unlink(temp_path)
+                return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
             
-            if image_data.startswith('data:image/png;base64,'):
-                image_data = image_data.split(',')[1]
-            
-            image_bytes = base64.b64decode(image_data)
-            image = Image.open(io.BytesIO(image_bytes))
+            image = Image.open(temp_path)
             
             if image.mode != 'RGB':
                 image = image.convert('RGB')
             
             img_array = np.array(image)
+            
+            # Clean up temporary file
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f'Failed to delete temp file {temp_path}: {e}')
             
             # Crop the requested region from the full screenshot
             end_y = min(top + self.original_height, img_array.shape[0])
