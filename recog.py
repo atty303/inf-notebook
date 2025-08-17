@@ -477,6 +477,7 @@ class Recognition():
                     return tabletarget[recogkey]
                 tabletarget = tabletarget[recogkey]
 
+            # Original exact matching (primary) - Windows-compatible
             resource_target = resource.musicselect['musicname']['arcade']
             thresholds = resource_target['thresholds']
             cropped = np_value[resource_target['trim']]
@@ -488,10 +489,21 @@ class Recognition():
             tabletarget = resource_target['table']
             for recogkey in recogkeys:
                 if not recogkey in tabletarget.keys():
-                    return None
+                    break
                 if type(tabletarget[recogkey]) is str:
                     return tabletarget[recogkey]
                 tabletarget = tabletarget[recogkey]
+            
+            # Fuzzy matching fallback for Linux compatibility
+            try:
+                from fuzzy_recognition_engine import load_fuzzy_recognition_engine
+                fuzzy_engine = load_fuzzy_recognition_engine()
+                fuzzy_result = fuzzy_engine.recognize(np_value)
+                if fuzzy_result is not None:
+                    return fuzzy_result
+            except Exception:
+                pass
+            
             return None
         
         @staticmethod

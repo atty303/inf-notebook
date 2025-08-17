@@ -37,6 +37,8 @@ class OBSCapture:
         self.password = password
     
     def shot(self, left, top):
+        # OBS captures the source, then we crop the requested region using left/top offsets
+        # This handles both full window capture and partial window capture scenarios
         import os
         import platform
         import uuid
@@ -68,17 +70,17 @@ class OBSCapture:
                 cache_dir = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache'))
                 cache_dir = cache_dir / 'inf-notebook'
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                temp_path = str(cache_dir / f'obs_capture_{uuid.uuid4().hex}.png')
+                temp_path = str(cache_dir / f'obs_capture_{uuid.uuid4().hex}.bmp')
             else:
                 # Windows: use user's temp directory
                 import tempfile
                 temp_dir = Path(tempfile.gettempdir())
-                temp_path = str(temp_dir / f'obs_capture_{uuid.uuid4().hex}.png')
+                temp_path = str(temp_dir / f'obs_capture_{uuid.uuid4().hex}.bmp')
             
             # Save screenshot to file
             response = self.ws.call(requests.SaveSourceScreenshot(
                 sourceName=self.source_name,
-                imageFormat='png',
+                imageFormat='bmp',
                 imageFilePath=temp_path
             ))
             
@@ -115,20 +117,26 @@ class OBSCapture:
             except Exception as e:
                 logger.warning(f'Failed to delete temp file {temp_path}: {e}')
             
-            # Crop the requested region from the full screenshot
+            # Crop the requested region from the captured source using left/top offsets
+            # Ensure crop coordinates are within image bounds
             end_y = min(top + self.original_height, img_array.shape[0])
             end_x = min(left + self.original_width, img_array.shape[1])
             
+            # Validate crop region
             if top >= 0 and left >= 0 and top < img_array.shape[0] and left < img_array.shape[1]:
                 cropped = img_array[top:end_y, left:end_x]
                 
-                # Ensure we have the exact size requested (pad with zeros if needed)
+                # Handle case where OBS minimum 8x8 size was used but we need original size
                 if cropped.shape[0] < self.original_height or cropped.shape[1] < self.original_width:
                     result = np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
                     result[:cropped.shape[0], :cropped.shape[1]] = cropped
-                    return result
+                    final_result = result
+                else:
+                    # Ensure exact size match (in case captured size is larger than requested)
+                    final_result = cropped[:self.original_height, :self.original_width]
                 
-                return cropped[:self.original_height, :self.original_width]
+                
+                return final_result
             else:
                 logger.warning(f'Crop region [{top}:{end_y}, {left}:{end_x}] is outside image bounds {img_array.shape}')
                 return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
