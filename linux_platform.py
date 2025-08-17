@@ -4,9 +4,28 @@ from pathlib import Path
 from typing import Optional
 from logging import getLogger
 
-from platform_service import PlatformService, GameDetector
+from platform_service import PlatformService, GameDetector, WindowHandle, Rectangle
 
 logger = getLogger(__name__)
+
+class LinuxGameDetector(GameDetector):
+    """Dummy game detector for Linux - always returns dummy values for OBS-only mode"""
+    
+    def find_game_window(self, title: str, executable: str) -> Optional[WindowHandle]:
+        """Return dummy window handle since Linux uses OBS capture only"""
+        return 1  # Dummy handle
+    
+    def get_window_rect(self, handle: WindowHandle) -> Optional[Rectangle]:
+        """Return dummy rectangle since Linux uses OBS capture only"""
+        return Rectangle(0, 0, 1920, 1080)  # Dummy rectangle
+    
+    def is_window_active(self, handle: WindowHandle) -> bool:
+        """Always return True since Linux uses OBS capture only"""
+        return True
+    
+    def get_active_window_title(self) -> Optional[str]:
+        """Return game window title to match Windows behavior"""
+        return "beatmania IIDX INFINITAS"
 
 class LinuxPlatformService(PlatformService):
     """Linux-specific platform service implementation (OBS-only)"""
@@ -98,9 +117,9 @@ class LinuxPlatformService(PlatformService):
         return Path(path_str).absolute()
     
     def create_game_detector(self) -> Optional[GameDetector]:
-        """Linux doesn't support game detection - OBS only"""
-        logger.info('Game detection not available on Linux - using OBS capture only')
-        return None
+        """Create dummy game detector for Linux - OBS only but maintains Windows compatibility"""
+        logger.info('Using dummy game detection on Linux - OBS capture only')
+        return LinuxGameDetector()
     
     def register_hotkeys(self, hotkey_config: dict, callbacks: dict) -> bool:
         """Register Linux global hotkeys - may fail due to permissions"""
