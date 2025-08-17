@@ -116,7 +116,7 @@ class Screenshot:
         if self.xy is None:
             return False
         
-        self.np_value = self.capture.shot(self.xy[0], self.xy[1])[::-1, :, ::-1]
+        self.np_value = self.capture.shot(self.xy[0], self.xy[1])
         return True
 
     def get_image(self):

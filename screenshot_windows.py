@@ -64,7 +64,9 @@ class WindowsCapture:
         windll.gdi32.BitBlt(self.screen_copy, 0, 0, self.width, self.height, self.screen, left, top, SRCCOPY)
         windll.gdi32.GetDIBits(self.screen_copy, self.bitmap, 0, self.height, ctypes.pointer(self.buffer), ctypes.pointer(self.bmi), DIB_RGB_COLORS)
 
-        return np.array(bytearray(self.buffer)).reshape(self.height, self.width, 3)
+        # Windows GDI returns image upside-down and in BGR format, convert to standard RGB format
+        raw_array = np.array(bytearray(self.buffer)).reshape(self.height, self.width, 3)
+        return raw_array[::-1, :, ::-1]
 
     def __del__(self):
         windll.gdi32.DeleteObject(self.bitmap)
