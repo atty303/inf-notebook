@@ -130,68 +130,53 @@ class ThreadMain(Thread):
             self.routine()
 
     def routine(self):
-        # Skip game window detection if using OBS capture
-        if self.game_detector is None:
-            # OBS mode - no window detection needed
-            if not self.active:
-                self.active = True
-                self.waiting = False
-                self.musicselect = False
-                self.sleep_time = thread_time_normal
-                self.queues['log'].put(f'obs mode activated: {self.sleep_time}')
-                api.send_message('switch_detect_infinitas', True)
-                api.send_message('switch_capturable', True)
-                self.queues['messages'].put('hotkey_start')
-            
-            # OBS mode always uses fixed position
-            screenshot.xy = (0, 0)
-        else:
-            # Traditional window detection mode
+        # Traditional window detection mode (works with both real and dummy detectors)
+        if self.handle == 0:
+            self.handle = self.game_detector.find_game_window(gamewindowtitle, exename)
             if self.handle == 0:
-                self.handle = self.game_detector.find_game_window(gamewindowtitle, exename)
-                if self.handle == 0:
-                    return
+                return
 
-                self.queues['log'].put(f'infinitas find')
-                api.send_message('switch_detect_infinitas', True)
-                self.active = False
-                screenshot.xy = None
-            
-            rect = self.game_detector.get_window_position(self.handle)
+            self.queues['log'].put(f'infinitas find')
+            api.send_message('switch_detect_infinitas', True)
+            self.active = False
+            screenshot.xy = None
+        
+        rect = self.game_detector.get_window_position(self.handle)
 
-            if rect is None or rect.width == 0 or rect.height == 0:
-                self.queues['log'].put(f'infinitas lost')
-                api.send_message('switch_detect_infinitas', False)
-                api.send_message('switch_capturable', False)
+        if rect is None or rect.right - rect.left == 0 or rect.bottom - rect.top == 0:
+            self.queues['log'].put(f'infinitas lost')
+            api.send_message('switch_detect_infinitas', False)
+            api.send_message('switch_capturable', False)
+            self.sleep_time = thread_time_wait_nonactive
+
+            self.handle = 0
+            self.active = False
+            screenshot.xy = None
+            self.queues['messages'].put('hotkey_stop')
+
+            return
+
+        if not self.game_detector.validate_game_resolution(rect):
+            if self.active:
                 self.sleep_time = thread_time_wait_nonactive
-
-                self.handle = 0
-                self.active = False
-                screenshot.xy = None
+                self.queues['log'].put(f'infinitas deactivate: {self.sleep_time}')
+                api.send_message('switch_capturable', False)
                 self.queues['messages'].put('hotkey_stop')
-                return
 
-            if not self.game_detector.validate_game_resolution(rect):
-                if self.active:
-                    self.sleep_time = thread_time_wait_nonactive
-                    self.queues['log'].put(f'infinitas deactivate: {self.sleep_time}')
-                    api.send_message('switch_capturable', False)
-                    self.queues['messages'].put('hotkey_stop')
-
-                self.active = False
-                screenshot.xy = None
-                return
-            
-            if not self.active:
-                self.active = True
-                self.waiting = False
-                self.musicselect = False
-                self.sleep_time = thread_time_normal
-                self.queues['log'].put(f'infinitas activate: {self.sleep_time}')
-                api.send_message('switch_capturable', True)
-                self.queues['messages'].put('hotkey_start')
-            
-            screenshot.xy = (rect.left, rect.top)
+            self.active = False
+            screenshot.xy = None
+            return
+        
+        if not self.active:
+            self.active = True
+            self.waiting = False
+            self.musicselect = False
+            self.sleep_time = thread_time_normal
+            self.queues['log'].put(f'infinitas activate: {self.sleep_time}')
+            api.send_message('switch_capturable', True)
+            self.queues['messages'].put('hotkey_start')
+        
+        screenshot.xy = (rect.left, rect.top)
         screen = screenshot.get_screen()
 
         if screen != self.screen_latest:
@@ -1233,6 +1218,8 @@ class GuiApiDiscordWebhook():
 
     def get_publics(self, event: webui.Event):
         self.events = storage.download_discordwebhooks()
+        if self.events is None:
+            self.events = {}
 
         publics = {}
         for key, value in self.events.items():
@@ -1242,6 +1229,8 @@ class GuiApiDiscordWebhook():
 
     def get_newpublics(self, event: webui.Event):
         self.events = storage.download_discordwebhooks()
+        if self.events is None:
+            self.events = {}
 
         setting.discord_webhook['seenevents'] = [item for item in setting.discord_webhook['seenevents'] if item in self.events.keys()]
         newpublics = {}
@@ -2026,8 +2015,8 @@ if __name__ == '__main__':
 
     event_close = Event()
     
-    # Create game detector only if not using OBS
-    game_detector = None if setting.obs_websocket['enabled'] else platform_service.create_game_detector()
+    # Create game detector - always available for compatibility
+    game_detector = platform_service.create_game_detector()
     
     thread = ThreadMain(
         event_close,

@@ -4,6 +4,7 @@ from PIL import Image
 from logging import getLogger
 from os.path import exists, basename
 import numpy as np
+import define
 
 logger_child_name = 'screenshot'
 
@@ -25,31 +26,36 @@ class Screenshot:
     screentable = load_resource_serialized('get_screen')
     np_value = None
 
-    def __init__(self, use_obs=False, obs_host='localhost', obs_port=4455, obs_password='', obs_source_name='Game Capture'):
+    def __init__(self):
         """
-        Initialize Screenshot with either OBS or Windows API backend
-        
-        Args:
-            use_obs: Whether to use OBS WebSocket for capture
-            obs_host: OBS WebSocket server host
-            obs_port: OBS WebSocket server port
-            obs_password: OBS WebSocket server password
-            obs_source_name: OBS source name to capture from
+        Initialize Screenshot with backend selection based on settings
         """
-        self.use_obs = use_obs
+        from setting import Setting
+        setting = Setting()
         
-        if use_obs:
+        self.use_obs = setting.obs_websocket['enabled']
+        
+        if self.use_obs:
             from screenshot_obs import OBSCapture
             logger.info('Using OBS WebSocket for screenshot capture')
+            self.capture = OBSCapture(
+                define.width, define.height,
+                host=setting.obs_websocket['host'],
+                port=setting.obs_websocket['port'],
+                password=setting.obs_websocket['password'],
+                source_name=setting.obs_websocket['source_name']
+            )
+            self.xy = (0, 0)  # Fixed position for OBS
             self.checkscreens = [
-                (screen, (areas['left'], areas['top']), 
-                 OBSCapture(areas['width'], areas['height'], obs_host, obs_port, obs_password, obs_source_name), 
+                (screen, (areas['left'], areas['top']),
+                 OBSCapture(areas['width'], areas['height'], 
+                           host=setting.obs_websocket['host'],
+                           port=setting.obs_websocket['port'],
+                           password=setting.obs_websocket['password'],
+                           source_name=setting.obs_websocket['source_name']), 
                  self.screentable[screen]) 
                 for screen, areas in define.screens.items()
             ]
-            self.capture = OBSCapture(define.width, define.height, obs_host, obs_port, obs_password, obs_source_name)
-            # For OBS, we don't need window position detection
-            self.xy = (0, 0)
         else:
             # Check platform for appropriate capture method
             if platform.system() == 'Windows':

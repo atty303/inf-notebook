@@ -22,16 +22,7 @@ from setting import Setting
 
 setting = Setting()
 
-if setting.obs_websocket['enabled']:
-    screenshot = Screenshot(
-        use_obs=True,
-        obs_host=setting.obs_websocket['host'],
-        obs_port=setting.obs_websocket['port'],
-        obs_password=setting.obs_websocket['password'],
-        obs_source_name=setting.obs_websocket['source_name']
-    )
-else:
-    screenshot = Screenshot(use_obs=False)
+screenshot = Screenshot()
 
 screen = None
 screens = {}

@@ -23,18 +23,24 @@ class OBSCapture:
         self.ws = None
         self.connected = False
         
-        if obs_available:
+        # Defer connection until first screenshot request
+        self.host = host
+        self.port = port
+        self.password = password
+    
+    def shot(self, left, top):
+        # Connect on first use if not already connected
+        if not self.connected and obs_available:
             try:
-                self.ws = obsws(host, port, password)
+                self.ws = obsws(self.host, self.port, self.password)
                 self.ws.connect()
                 self.connected = True
-                logger.info(f'Connected to OBS WebSocket at {host}:{port}')
-                logger.info(f'Using OBS source: {source_name}')
+                logger.info(f'Connected to OBS WebSocket at {self.host}:{self.port}')
+                logger.info(f'Using OBS source: {self.source_name}')
             except Exception as e:
                 logger.error(f'Failed to connect to OBS WebSocket: {e}')
                 logger.info('Make sure OBS is running with WebSocket server enabled')
-    
-    def shot(self, left, top):
+        
         if not self.connected or not self.ws:
             return np.zeros((self.height, self.width, 3), dtype=np.uint8)
         

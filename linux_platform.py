@@ -15,6 +15,14 @@ class LinuxGameDetector(GameDetector):
         """Return dummy window handle since Linux uses OBS capture only"""
         return 1  # Dummy handle
     
+    def get_window_position(self, handle: WindowHandle) -> Optional[Rectangle]:
+        """Return dummy rectangle since Linux uses OBS capture only"""
+        return Rectangle(0, 0, 1920, 1080)  # Dummy rectangle
+    
+    def validate_game_resolution(self, rect: Rectangle) -> bool:
+        """Always return True since Linux uses OBS capture only"""
+        return True
+    
     def get_window_rect(self, handle: WindowHandle) -> Optional[Rectangle]:
         """Return dummy rectangle since Linux uses OBS capture only"""
         return Rectangle(0, 0, 1920, 1080)  # Dummy rectangle
