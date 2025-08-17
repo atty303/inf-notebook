@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 from export import export_dirname
-from windows import openfolder
+from platform_factory import get_platform_service
 from general import get_imagevalue
 
 dirname_results = 'results'
@@ -317,19 +317,19 @@ def load_image(music, timestamp, destination_dirpath, target_dirname, scoretype)
 
 def openfolder_results(destination_dirpath):
     dirpath = join(destination_dirpath, dirname_results)
-    return openfolder(dirpath)
+    return get_platform_service().open_folder_in_explorer(dirpath)
 
 def openfolder_filtereds(destination_dirpath):
     dirpath = join(destination_dirpath, dirname_filtereds)
-    return openfolder(dirpath)
+    return get_platform_service().open_folder_in_explorer(dirpath)
 
 def openfolder_scorecharts(destination_dirpath):
     dirpath = join(destination_dirpath, dirname_scorecharts)
-    return openfolder(dirpath)
+    return get_platform_service().open_folder_in_explorer(dirpath)
 
 def openfolder_scoreinformations(destination_dirpath):
     dirpath = join(destination_dirpath, dirname_scoreinformations)
-    return openfolder(dirpath)
+    return get_platform_service().open_folder_in_explorer(dirpath)
 
 def openfolder_export():
-    return openfolder(export_dirname)
+    return get_platform_service().open_folder_in_explorer(export_dirname)

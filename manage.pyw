@@ -2,6 +2,7 @@ import PySimpleGUI as sg
 import glob
 import os
 import logging
+import platform
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -17,8 +18,20 @@ logger.debug('loaded manage.py')
 import gui.manage as gui
 from screenshot import Screenshot,open_screenimage
 from resources_learning import RawLabel,raws_basepath
+from setting import Setting
 
-screenshot = Screenshot()
+setting = Setting()
+
+if setting.obs_websocket['enabled']:
+    screenshot = Screenshot(
+        use_obs=True,
+        obs_host=setting.obs_websocket['host'],
+        obs_port=setting.obs_websocket['port'],
+        obs_password=setting.obs_websocket['password'],
+        obs_source_name=setting.obs_websocket['source_name']
+    )
+else:
+    screenshot = Screenshot(use_obs=False)
 
 screen = None
 screens = {}

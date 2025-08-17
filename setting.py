@@ -55,6 +55,13 @@ default = {
         'main': 52374,
         'socket': 57328,
     },
+    'obs_websocket': {
+        'host': 'localhost',
+        'port': 4455,
+        'password': '',
+        'source_name': 'Game Capture',
+        'enabled': False,
+    },
 }
 
 class Setting():
@@ -313,3 +320,13 @@ class Setting():
         デバッグ用のログ表示を有効にする。
         '''
         return self.get_value('debug')
+    
+    @property
+    def obs_websocket(self):
+        '''OBS WebSocket設定
+        '''
+        return self.get_value('obs_websocket')
+    
+    @obs_websocket.setter
+    def obs_websocket(self, value):
+        self.set_value('obs_websocket', value)

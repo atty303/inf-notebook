@@ -59,7 +59,7 @@ from export import (
     exportimage_musicinformation_filepath,
     csssetting_filepath,
 )
-from windows import find_window,get_rect,check_rectsize,gethandle,show_messagebox,change_window_setting
+from platform_factory import get_platform_service
 import image
 from image import (
     save_resultimage,
@@ -116,9 +116,10 @@ class ThreadMain(Thread):
     processed: bool = False
     screen_latest = None
 
-    def __init__(self, event_close: Event, queues: dict[str, Queue]):
+    def __init__(self, event_close: Event, queues: dict[str, Queue], game_detector=None):
         self.event_close = event_close
         self.queues = queues
+        self.game_detector = game_detector
 
         Thread.__init__(self)
 
@@ -129,52 +130,68 @@ class ThreadMain(Thread):
             self.routine()
 
     def routine(self):
-        if self.handle == 0:
-            self.handle = find_window(gamewindowtitle, exename)
+        # Skip game window detection if using OBS capture
+        if self.game_detector is None:
+            # OBS mode - no window detection needed
+            if not self.active:
+                self.active = True
+                self.waiting = False
+                self.musicselect = False
+                self.sleep_time = thread_time_normal
+                self.queues['log'].put(f'obs mode activated: {self.sleep_time}')
+                api.send_message('switch_detect_infinitas', True)
+                api.send_message('switch_capturable', True)
+                self.queues['messages'].put('hotkey_start')
+            
+            # OBS mode always uses fixed position
+            screenshot.xy = (0, 0)
+        else:
+            # Traditional window detection mode
             if self.handle == 0:
+                self.handle = self.game_detector.find_game_window(gamewindowtitle, exename)
+                if self.handle == 0:
+                    return
+
+                self.queues['log'].put(f'infinitas find')
+                api.send_message('switch_detect_infinitas', True)
+                self.active = False
+                screenshot.xy = None
+            
+            rect = self.game_detector.get_window_position(self.handle)
+
+            if rect is None or rect.width == 0 or rect.height == 0:
+                self.queues['log'].put(f'infinitas lost')
+                api.send_message('switch_detect_infinitas', False)
+                api.send_message('switch_capturable', False)
+                self.sleep_time = thread_time_wait_nonactive
+
+                self.handle = 0
+                self.active = False
+                screenshot.xy = None
+                self.queues['messages'].put('hotkey_stop')
                 return
 
-            self.queues['log'].put(f'infinitas find')
-            api.send_message('switch_detect_infinitas', True)
-            self.active = False
-            screenshot.xy = None
-        
-        rect = get_rect(self.handle)
+            if not self.game_detector.validate_game_resolution(rect):
+                if self.active:
+                    self.sleep_time = thread_time_wait_nonactive
+                    self.queues['log'].put(f'infinitas deactivate: {self.sleep_time}')
+                    api.send_message('switch_capturable', False)
+                    self.queues['messages'].put('hotkey_stop')
 
-        if rect is None or rect.right - rect.left == 0 or rect.bottom - rect.top == 0:
-            self.queues['log'].put(f'infinitas lost')
-            api.send_message('switch_detect_infinitas', False)
-            api.send_message('switch_capturable', False)
-            self.sleep_time = thread_time_wait_nonactive
-
-            self.handle = 0
-            self.active = False
-            screenshot.xy = None
-            self.queues['messages'].put('hotkey_stop')
-
-            return
-
-        if not check_rectsize(rect):
-            if self.active:
-                self.sleep_time = thread_time_wait_nonactive
-                self.queues['log'].put(f'infinitas deactivate: {self.sleep_time}')
-                api.send_message('switch_capturable', False)
-                self.queues['messages'].put('hotkey_stop')
-
-            self.active = False
-            screenshot.xy = None
-            return
-        
-        if not self.active:
-            self.active = True
-            self.waiting = False
-            self.musicselect = False
-            self.sleep_time = thread_time_normal
-            self.queues['log'].put(f'infinitas activate: {self.sleep_time}')
-            api.send_message('switch_capturable', True)
-            self.queues['messages'].put('hotkey_start')
-        
-        screenshot.xy = (rect.left, rect.top)
+                self.active = False
+                screenshot.xy = None
+                return
+            
+            if not self.active:
+                self.active = True
+                self.waiting = False
+                self.musicselect = False
+                self.sleep_time = thread_time_normal
+                self.queues['log'].put(f'infinitas activate: {self.sleep_time}')
+                api.send_message('switch_capturable', True)
+                self.queues['messages'].put('hotkey_start')
+            
+            screenshot.xy = (rect.left, rect.top)
         screen = screenshot.get_screen()
 
         if screen != self.screen_latest:
@@ -1963,8 +1980,10 @@ def stop_hotkeys():
             api.send_message('append_log', '\n'.join(('failed stop hotkey.', str(ex))))
 
 if __name__ == '__main__':
-    if gethandle(windowtitle) is not None:
-        show_messagebox('多重起動はできません。', windowtitle)
+    platform_service = get_platform_service()
+    
+    if platform_service.prevent_multiple_instances(windowtitle):
+        platform_service.show_error_dialog('多重起動はできません。', windowtitle)
         exit()
     
     generate_exportsettingcss(setting.port['socket'])
@@ -2008,6 +2027,10 @@ if __name__ == '__main__':
     storage = StorageAccessor()
 
     event_close = Event()
+    
+    # Create game detector only if not using OBS
+    game_detector = None if setting.obs_websocket['enabled'] else platform_service.create_game_detector()
+    
     thread = ThreadMain(
         event_close,
         queues = {
@@ -2016,7 +2039,8 @@ if __name__ == '__main__':
             'musicselect_screen': queue_musicselect_screen,
             'messages': queue_messages,
             'multimessages': queue_multimessages
-        }
+        },
+        game_detector=game_detector
     )
 
     insert_recentnotebook_results()
@@ -2038,12 +2062,21 @@ if __name__ == '__main__':
     api_discordwebhook = GuiApiDiscordWebhook(newwindow)
 
     newwindow.show('index.html')
-    handle = gethandle(windowtitle)
+    
+    # Find our application window and configure it
+    import time
+    handle = None
+    for _ in range(10):  # Try for up to 1 second
+        handle = platform_service.get_app_window_handle(windowtitle)
+        if handle:
+            break
+        time.sleep(0.1)
+    
     if handle is None:
-        show_messagebox('起動に失敗しました。', windowtitle)
+        platform_service.show_error_dialog('起動に失敗しました。', windowtitle)
         exit()
     
-    change_window_setting(handle)
+    platform_service.configure_app_window(handle)
 
     mainloop()
 

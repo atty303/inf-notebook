@@ -1,8 +1,7 @@
 import json
 from os.path import exists
-from pathlib import WindowsPath
 
-from windows import get_appdata_path,get_local_appdata_path
+from platform_factory import get_platform_service
 
 class LocalConfig():
     filename = 'config.json'
@@ -13,8 +12,9 @@ class LocalConfig():
         self.installer_filepath = None
         self.installed_dirpath = None
 
-        appdata_path = get_local_appdata_path()
-        if appdata_path is None:
+        try:
+            appdata_path = get_platform_service().get_cache_directory()
+        except Exception:
             return
         
         self.filepath = appdata_path.joinpath(self.filename)
@@ -22,10 +22,12 @@ class LocalConfig():
             with self.filepath.open('r', encoding='UTF-8') as f:
                 loaded: dict = json.load(f)
             
+            platform_service = get_platform_service()
+            
             if 'installer_filepath' in loaded.keys() and loaded['installer_filepath'] is not None and exists(loaded['installer_filepath']):
-                self.installer_filepath = WindowsPath(loaded['installer_filepath']).absolute()
+                self.installer_filepath = platform_service.absolute_path(loaded['installer_filepath'])
             if 'installed_dirpath' in loaded.keys() and loaded['installed_dirpath'] is not None and exists(loaded['installed_dirpath']):
-                self.installed_dirpath = WindowsPath(loaded['installed_dirpath']).absolute()
+                self.installed_dirpath = platform_service.absolute_path(loaded['installed_dirpath'])
 
     def save(self):
         if self.filepath is None:

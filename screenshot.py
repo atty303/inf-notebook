@@ -1,9 +1,8 @@
-import ctypes
-from ctypes import windll,wintypes,create_string_buffer
+import platform
 from datetime import datetime
 from PIL import Image
 from logging import getLogger
-from os.path import exists,basename
+from os.path import exists, basename
 import numpy as np
 
 logger_child_name = 'screenshot'
@@ -14,89 +13,76 @@ logger.debug('loaded screenshot.py')
 from define import define
 from resources import load_resource_serialized
 
-SRCCOPY = 0x00CC0020
-DIB_RGB_COLORS = 0
-PW_CLIENTONLY = 1
-
-class BITMAPINFOHEADER(ctypes.Structure):
-    _fields_ = [
-        ('biSize', wintypes.DWORD),
-        ('biWidth', wintypes.LONG),
-        ('biHeight', wintypes.LONG),
-        ('biPlanes', wintypes.WORD),
-        ('biBitCount', wintypes.WORD),
-        ('biCompression', wintypes.DWORD),
-        ('biSizeImage', wintypes.DWORD),
-        ('biXPelsPerMeter', wintypes.LONG),
-        ('biYPelsPerMeter', wintypes.LONG),
-        ('biClrUsed', wintypes.DWORD),
-        ('biClrImportant', wintypes.DWORD),
-    ]
-
-class RGBQUAD(ctypes.Structure):
-    _fields_ = [
-        ('rgbRed', ctypes.c_byte),
-        ('rgbGreen', ctypes.c_byte),
-        ('rgbBlue', ctypes.c_byte),
-        ('rgbReserved', ctypes.c_byte),
-    ]
-
-class BITMAPINFO(ctypes.Structure):
-    _fields_ = [
-        ('bmiHeader', BITMAPINFOHEADER),
-        ('bmiColors', ctypes.POINTER(RGBQUAD))
-    ]
-
 class Screen:
     def __init__(self, np_value, filename):
         self.np_value = np_value
-
+        
         self.original = Image.fromarray(np_value)
         self.filename = filename
-
-class Capture:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-
-        self.bmi = BITMAPINFO()
-        self.bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        self.bmi.bmiHeader.biWidth = self.width
-        self.bmi.bmiHeader.biHeight = self.height
-        self.bmi.bmiHeader.biPlanes = 1
-        self.bmi.bmiHeader.biBitCount = 24
-        self.bmi.bmiHeader.biCompression = 0
-        self.bmi.bmiHeader.biSizeImage = 0
-
-        self.screen = windll.gdi32.CreateDCW("DISPLAY", None, None, None)
-        self.screen_copy = windll.gdi32.CreateCompatibleDC(self.screen)
-        self.bitmap = windll.gdi32.CreateCompatibleBitmap(self.screen, self.width, self.height)
-
-        windll.gdi32.SelectObject(self.screen_copy, self.bitmap)
-
-        self.buffer = create_string_buffer(self.height * self.width * 3)
-    
-    def shot(self, left, top):
-        windll.gdi32.BitBlt(self.screen_copy, 0, 0, self.width, self.height, self.screen, left, top, SRCCOPY)
-        windll.gdi32.GetDIBits(self.screen_copy, self.bitmap, 0, self.height, ctypes.pointer(self.buffer), ctypes.pointer(self.bmi), DIB_RGB_COLORS)
-
-        return np.array(bytearray(self.buffer)).reshape(self.height, self.width, 3)
-
-    def __del__(self):
-        windll.gdi32.DeleteObject(self.bitmap)
-        windll.gdi32.DeleteDC(self.screen_copy)
-        windll.gdi32.DeleteDC(self.screen)
-
-        logger.debug('Called Screenshot destuctor.')
 
 class Screenshot:
     xy = None
     screentable = load_resource_serialized('get_screen')
     np_value = None
 
-    def __init__(self):
-        self.checkscreens = [(screen, (areas['left'], areas['top']), Capture(areas['width'], areas['height']), self.screentable[screen]) for screen, areas in define.screens.items()]
-        self.capture = Capture(define.width, define.height)
+    def __init__(self, use_obs=False, obs_host='localhost', obs_port=4455, obs_password='', obs_source_name='Game Capture'):
+        """
+        Initialize Screenshot with either OBS or Windows API backend
+        
+        Args:
+            use_obs: Whether to use OBS WebSocket for capture
+            obs_host: OBS WebSocket server host
+            obs_port: OBS WebSocket server port
+            obs_password: OBS WebSocket server password
+            obs_source_name: OBS source name to capture from
+        """
+        self.use_obs = use_obs
+        
+        if use_obs:
+            from screenshot_obs import OBSCapture
+            logger.info('Using OBS WebSocket for screenshot capture')
+            self.checkscreens = [
+                (screen, (areas['left'], areas['top']), 
+                 OBSCapture(areas['width'], areas['height'], obs_host, obs_port, obs_password, obs_source_name), 
+                 self.screentable[screen]) 
+                for screen, areas in define.screens.items()
+            ]
+            self.capture = OBSCapture(define.width, define.height, obs_host, obs_port, obs_password, obs_source_name)
+            # For OBS, we don't need window position detection
+            self.xy = (0, 0)
+        else:
+            # Check platform for appropriate capture method
+            if platform.system() == 'Windows':
+                from screenshot_windows import WindowsCapture
+                logger.info('Using Windows API for screenshot capture')
+                Capture = WindowsCapture
+            else:
+                # Linux without OBS - use dummy capture
+                logger.warning('No capture method available for Linux without OBS')
+                class DummyCapture:
+                    def __init__(self, width, height):
+                        self.width = width
+                        self.height = height
+                    
+                    def shot(self, left, top):
+                        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                    
+                    def __del__(self):
+                        pass
+                
+                Capture = DummyCapture
+            
+            self.checkscreens = [
+                (screen, (areas['left'], areas['top']), 
+                 Capture(areas['width'], areas['height']), 
+                 self.screentable[screen]) 
+                for screen, areas in define.screens.items()
+            ]
+            self.capture = Capture(define.width, define.height)
+            
+            # For Linux without OBS, set default position
+            if platform.system() == 'Linux':
+                self.xy = (0, 0)
 
     def __del__(self):
         for screen, pos, capture, value in self.checkscreens:
