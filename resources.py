@@ -1,6 +1,6 @@
 import os
+import sys
 import numpy as np
-from winsound import SND_FILENAME,PlaySound
 from logging import getLogger
 import pickle
 from os.path import isfile
@@ -88,7 +88,24 @@ class ResourceTimestamp():
 
 def play_sound_result():
     if os.path.exists(sound_result_filepath):
-        PlaySound(sound_result_filepath, SND_FILENAME)
+        try:
+            if sys.platform == 'win32':
+                import winsound
+                winsound.PlaySound(sound_result_filepath, winsound.SND_FILENAME)
+            elif sys.platform == 'darwin':
+                os.system(f'afplay "{sound_result_filepath}"')
+            else:  # Linux and other Unix-like systems
+                # Try multiple commands in order of preference
+                if os.system('which pw-play >/dev/null 2>&1') == 0:
+                    os.system(f'pw-play "{sound_result_filepath}"')
+                elif os.system('which paplay >/dev/null 2>&1') == 0:
+                    os.system(f'paplay "{sound_result_filepath}"')
+                elif os.system('which aplay >/dev/null 2>&1') == 0:
+                    os.system(f'aplay -q "{sound_result_filepath}"')
+                else:
+                    logger.warning('No suitable audio player found on Linux')
+        except Exception as e:
+            logger.error(f'Failed to play sound: {e}')
 
 def load_resource_serialized(resourcename):
     filepath = os.path.join(resources_dirname, f'{resourcename}.res')
