@@ -7,6 +7,7 @@ import numpy as np
 import pickle
 import json
 import os
+import time
 from typing import Optional, Tuple, List, Dict, Any
 
 class FuzzyRecognitionEngine:
@@ -19,6 +20,7 @@ class FuzzyRecognitionEngine:
         self.arcade_config = arcade_config
         self.binary_db = None
         self.max_distance = 1  # Default: single-bit tolerance
+        self.performance_log_path = '/tmp/fuzzy_performance.jsonl'
         self._build_binary_database()
     
     def _hex_to_binary(self, hex_string: str) -> np.ndarray:
@@ -113,7 +115,7 @@ class FuzzyRecognitionEngine:
     
     def recognize(self, np_value: np.ndarray) -> Optional[str]:
         """
-        Main recognition function with dynamic tolerance adjustment
+        Main recognition function with performance logging
         
         Args:
             np_value: Full screenshot image (not trimmed)
@@ -121,8 +123,20 @@ class FuzzyRecognitionEngine:
         Returns:
             Song name if recognized, None otherwise
         """
+        start_time = time.time()
+        
+        # Prepare logging entry
+        log_entry = {
+            "timestamp": int(start_time * 1000),
+            "phase": "fuzzy_recognition", 
+            "strategies_tried": [],
+            "success": False,
+            "result": None,
+            "total_time_ms": 0
+        }
+        
         try:
-            # Ultra-fine-grained tolerance strategy for 100% stable image recognition
+            # Original 30 strategies (no optimization)
             tolerance_strategies = [
                 (1, 0),   # Step 0: most strict (near Windows exact)
                 (2, 0),   # Step 1: optimal baseline  
@@ -157,24 +171,48 @@ class FuzzyRecognitionEngine:
                 (10, 4),  # Step 30: maximum tolerance
             ]
             
-            for attempt, (gray_tolerance, threshold_tolerance) in enumerate(tolerance_strategies):
-                result = self._try_recognition_with_tolerance(np_value, gray_tolerance, threshold_tolerance)
-                if result is not None:
-                    return result
-                    
-            # If all strategies failed, try higher Hamming distance tolerances
-            result = self.try_with_higher_tolerance(np_value)
-            if result:
-                return result
+            # Try each strategy once with max distance (2), select minimum distance match
+            for strategy_idx, (gray_tolerance, threshold_tolerance) in enumerate(tolerance_strategies):
+                strategy_start = time.time()
                 
-            # Recognition failed - likely unstable image (transition, etc.)
-            return None
+                # Set max Hamming distance (10) and let fuzzy search find best match
+                original_distance = self.max_distance
+                self.max_distance = 10  # Search with max distance
+                
+                result, match_distance = self._try_recognition_with_tolerance_and_distance(np_value, gray_tolerance, threshold_tolerance)
+                strategy_time = (time.time() - strategy_start) * 1000
+                
+                # Restore original distance
+                self.max_distance = original_distance
+                
+                # Log this attempt
+                strategy_log = {
+                    "attempt": len(log_entry["strategies_tried"]) + 1,
+                    "gray_tolerance": gray_tolerance,
+                    "threshold_tolerance": threshold_tolerance,
+                    "hamming_distance": match_distance if result else 10,  # Log actual match distance or max tried
+                    "time_ms": strategy_time,
+                    "success": result is not None,
+                    "result": result
+                }
+                log_entry["strategies_tried"].append(strategy_log)
+                
+                if result is not None:
+                    log_entry["success"] = True
+                    log_entry["result"] = result
+                    log_entry["winning_distance"] = match_distance
+                    break  # Exit strategy loop
+                
+        except Exception as e:
+            log_entry["error"] = str(e)
+        finally:
+            log_entry["total_time_ms"] = (time.time() - start_time) * 1000
+            self._write_performance_log(log_entry)
             
-        except Exception:
-            return None
+        return log_entry.get("result")
     
-    def _try_recognition_with_tolerance(self, np_value: np.ndarray, gray_tolerance: int, threshold_tolerance: int) -> Optional[str]:
-        """Try recognition with specific tolerance values"""
+    def _try_recognition_with_tolerance_and_distance(self, np_value: np.ndarray, gray_tolerance: int, threshold_tolerance: int) -> Tuple[Optional[str], int]:
+        """Try recognition and return result with actual Hamming distance used"""
         
         # Apply arcade processing pipeline
         arcade_trim = self.arcade_config['trim']
@@ -189,7 +227,7 @@ class FuzzyRecognitionEngine:
         
         # Early termination if no gray pixels detected
         if gray_pixel_count == 0:
-            return None
+            return None, 0
         
         # Threshold each row with tolerance
         thresholds = self.arcade_config['thresholds']
@@ -205,7 +243,7 @@ class FuzzyRecognitionEngine:
         
         # Check if we have meaningful patterns
         if non_zero_bins < 3:
-            return None
+            return None, 0
         
         # Generate patterns
         shrunk = [line[::2]&line[1::2] for line in bins]
@@ -221,41 +259,41 @@ class FuzzyRecognitionEngine:
         matches = self._fuzzy_search(query_binary_path)
         
         if matches:
-            best_match = matches[0]
-            return best_match['song_name']
+            best_match = matches[0]  # Already sorted by distance (ascending)
+            return best_match['song_name'], best_match['total_distance']
         
-        return None
+        return None, 0
+    
+    def _try_recognition_with_tolerance_logged(self, np_value: np.ndarray, gray_tolerance: int, threshold_tolerance: int) -> Optional[str]:
+        """Try recognition with specific tolerance values (compatibility wrapper)"""
+        result, _ = self._try_recognition_with_tolerance_and_distance(np_value, gray_tolerance, threshold_tolerance)
+        return result
+    
+    def _try_recognition_with_tolerance(self, np_value: np.ndarray, gray_tolerance: int, threshold_tolerance: int) -> Optional[str]:
+        """Try recognition with specific tolerance values (original version for compatibility)"""
+        return self._try_recognition_with_tolerance_logged(np_value, gray_tolerance, threshold_tolerance)
     
     
     def set_tolerance(self, max_distance: int):
         """Set maximum Hamming distance tolerance"""
         self.max_distance = max_distance
     
-    def try_with_higher_tolerance(self, np_value: np.ndarray) -> Optional[str]:
-        """Try recognition with progressively higher Hamming distance tolerance"""
-        
-        for max_distance in range(2, 10):  # Test 2-9 bit tolerance for maximum coverage
-            original_tolerance = self.max_distance
-            self.set_tolerance(max_distance)
-            
-            # Try with comprehensive tolerance combinations for higher distances
-            high_distance_strategies = [
-                (1, 0), (1, 1), (1, 2), (1, 3),  # Strict gray, varying threshold
-                (2, 1), (3, 1), (4, 1), (5, 1),  # Low threshold, varying gray
-                (2, 2), (3, 2), (4, 2), (5, 2),  # Medium threshold, varying gray
-                (3, 3), (4, 3), (5, 3), (6, 3),  # High threshold, varying gray
-                (7, 2), (8, 2), (9, 3), (10, 4), # Extreme combinations
-            ]
-            
-            for gray_tol, thresh_tol in high_distance_strategies:
-                result = self._try_recognition_with_tolerance(np_value, gray_tol, thresh_tol)
-                if result:
-                    self.set_tolerance(original_tolerance)  # Restore
-                    return result
-            
-            self.set_tolerance(original_tolerance)  # Restore
-        
+    def try_with_higher_tolerance_logged(self, np_value: np.ndarray) -> Optional[str]:
+        """Deprecated - now integrated into main loop"""
+        # This function is no longer needed since Hamming distances are integrated
         return None
+    
+    def try_with_higher_tolerance(self, np_value: np.ndarray) -> Optional[str]:
+        """Try recognition with progressively higher Hamming distance tolerance (original version)"""
+        return self.try_with_higher_tolerance_logged(np_value)
+    
+    def _write_performance_log(self, log_entry: Dict):
+        """Write performance log entry to JSONL file"""
+        try:
+            with open(self.performance_log_path, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception:
+            pass  # Silent fail for logging
 
 def load_fuzzy_recognition_engine() -> FuzzyRecognitionEngine:
     """Load and initialize fuzzy recognition engine"""

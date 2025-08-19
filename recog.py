@@ -478,6 +478,10 @@ class Recognition():
                 tabletarget = tabletarget[recogkey]
 
             # Original exact matching (primary) - Windows-compatible
+            import time
+            import json
+            
+            exact_start = time.time()
             resource_target = resource.musicselect['musicname']['arcade']
             thresholds = resource_target['thresholds']
             cropped = np_value[resource_target['trim']]
@@ -487,12 +491,37 @@ class Recognition():
             hexes = [line[::4]*8+line[1::4]*4+line[2::4]*2+line[3::4] for line in shrunk]
             recogkeys = [''.join([format(v, '0x') for v in line]) for line in hexes]
             tabletarget = resource_target['table']
+            
+            exact_result = None
             for recogkey in recogkeys:
                 if not recogkey in tabletarget.keys():
                     break
                 if type(tabletarget[recogkey]) is str:
-                    return tabletarget[recogkey]
+                    exact_result = tabletarget[recogkey]
+                    break
                 tabletarget = tabletarget[recogkey]
+            
+            exact_time = (time.time() - exact_start) * 1000
+            
+            # Log exact matching performance
+            exact_log = {
+                "timestamp": int(time.time() * 1000),
+                "phase": "exact_recognition",
+                "success": exact_result is not None,
+                "result": exact_result,
+                "time_ms": exact_time,
+                "gray_pixels": int(np.count_nonzero(masked)),
+                "pattern_length": len(recogkeys)
+            }
+            
+            try:
+                with open('/tmp/fuzzy_performance.jsonl', 'a') as f:
+                    f.write(json.dumps(exact_log) + '\n')
+            except Exception:
+                pass
+            
+            if exact_result is not None:
+                return exact_result
             
             # Fuzzy matching fallback for Linux compatibility
             try:
