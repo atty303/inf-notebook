@@ -524,6 +524,7 @@ class Recognition():
                 return exact_result
             
             # Fuzzy matching fallback for Linux compatibility
+            fuzzy_result = None
             try:
                 from fuzzy_recognition_engine import load_fuzzy_recognition_engine
                 fuzzy_engine = load_fuzzy_recognition_engine()
@@ -532,6 +533,46 @@ class Recognition():
                     return fuzzy_result
             except Exception:
                 pass
+            
+            # Recognition failed - save image for debugging
+            try:
+                import os
+                from PIL import Image
+                
+                debug_dir = '/tmp/recognition_failures'
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                timestamp = int(time.time() * 1000)
+                
+                # Save as PNG images using PIL
+                image_path = f'{debug_dir}/failed_{timestamp}_full.png'
+                arcade_crop_path = f'{debug_dir}/failed_{timestamp}_arcade.png'
+                
+                # Convert BGR to RGB for PIL if needed
+                full_rgb = np_value[:,:,::-1] if len(np_value.shape) == 3 and np_value.shape[2] == 3 else np_value
+                arcade_rgb = cropped[:,:,::-1] if len(cropped.shape) == 3 and cropped.shape[2] == 3 else cropped
+                
+                # Save images
+                Image.fromarray(full_rgb.astype(np.uint8)).save(image_path)
+                Image.fromarray(arcade_rgb.astype(np.uint8)).save(arcade_crop_path)
+                
+                # Log failure with image paths
+                failure_log = {
+                    "timestamp": timestamp,
+                    "phase": "recognition_failure",
+                    "full_image_path": image_path,
+                    "arcade_crop_path": arcade_crop_path,
+                    "gray_pixels": int(np.count_nonzero(masked)),
+                    "pattern_length": len(recogkeys),
+                    "exact_failed": exact_result is None,
+                    "fuzzy_failed": fuzzy_result is None
+                }
+                
+                with open('/tmp/fuzzy_performance.jsonl', 'a') as f:
+                    f.write(json.dumps(failure_log) + '\n')
+                    
+            except Exception:
+                pass  # Silent fail for debug saving
             
             return None
         

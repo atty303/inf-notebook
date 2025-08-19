@@ -97,17 +97,18 @@ class FuzzyRecognitionEngine:
                 step_distances.append(step_distance)
                 total_distance += step_distance
                 
-                # Early termination if step exceeds threshold
-                if step_distance > self.max_distance:
+                # Early termination if total distance exceeds threshold
+                if total_distance > self.max_distance:
                     break
             else:
-                # All steps within threshold
-                matches.append({
-                    'song_name': db_entry['song_name'],
-                    'total_distance': total_distance,
-                    'step_distances': step_distances,
-                    'hex_path': db_entry['hex_path']
-                })
+                # All steps completed and total distance within threshold
+                if total_distance <= self.max_distance:
+                    matches.append({
+                        'song_name': db_entry['song_name'],
+                        'total_distance': total_distance,
+                        'step_distances': step_distances,
+                        'hex_path': db_entry['hex_path']
+                    })
         
         # Sort by distance (best matches first)
         matches.sort(key=lambda x: x['total_distance'])
@@ -136,39 +137,104 @@ class FuzzyRecognitionEngine:
         }
         
         try:
-            # Original 30 strategies (no optimization)
+            # Comprehensive fine-grained strategies with micro-steps
             tolerance_strategies = [
-                (1, 0),   # Step 0: most strict (near Windows exact)
-                (2, 0),   # Step 1: optimal baseline  
-                (3, 0),   # Step 2: slight gray relaxation
-                (4, 0),   # Step 3: moderate gray relaxation
-                (5, 0),   # Step 4: higher gray only
-                (6, 0),   # Step 5: very high gray only
-                (1, 1),   # Step 6: strict gray + threshold tolerance
-                (2, 1),   # Step 7: add threshold tolerance to baseline
-                (3, 1),   # Step 8: combined relaxation
-                (4, 1),   # Step 9: more combined
-                (5, 1),   # Step 10: higher gray
-                (6, 1),   # Step 11: very high gray + low threshold
-                (7, 1),   # Step 12: maximum gray + low threshold
-                (1, 2),   # Step 13: strict gray + medium threshold
-                (2, 2),   # Step 14: baseline gray + medium threshold
-                (3, 2),   # Step 15: medium gray + medium threshold
-                (4, 2),   # Step 16: both moderate-high
-                (5, 2),   # Step 17: both high
-                (6, 2),   # Step 18: very high gray + medium threshold
-                (7, 2),   # Step 19: max gray + medium threshold
-                (1, 3),   # Step 20: strict gray + high threshold
-                (2, 3),   # Step 21: baseline gray + high threshold
-                (3, 3),   # Step 22: medium gray + high threshold
-                (4, 3),   # Step 23: moderate gray + high threshold
-                (5, 3),   # Step 24: high gray + high threshold
-                (6, 3),   # Step 25: very high gray + high threshold
-                (7, 3),   # Step 26: maximum practical
-                (8, 2),   # Step 27: ultra-high gray + medium threshold
-                (8, 3),   # Step 28: ultra-high gray + high threshold
-                (9, 3),   # Step 29: extreme gray + high threshold
-                (10, 4),  # Step 30: maximum tolerance
+                # Ultra-fine grain for critical small thresholds
+                (0, 0),   # Step 0: Windows exact match attempt
+                (1, 0),   # Step 1: minimal gray tolerance
+                (2, 0),   # Step 2: baseline gray only
+                (3, 0),   # Step 3: slight gray relaxation
+                (4, 0),   # Step 4: moderate gray only
+                (5, 0),   # Step 5: higher gray only
+                (6, 0),   # Step 6: very high gray only
+                
+                # Threshold micro-increments with minimal gray
+                (0, 1),   # Step 7: exact gray + minimal threshold
+                (1, 1),   # Step 8: minimal both tolerances 
+                (2, 1),   # Step 9: baseline + minimal threshold
+                (3, 1),   # Step 10: slight gray + minimal threshold
+                (4, 1),   # Step 11: moderate gray + minimal threshold
+                (5, 1),   # Step 12: higher gray + minimal threshold
+                (6, 1),   # Step 13: very high gray + minimal threshold
+                (7, 1),   # Step 14: max gray + minimal threshold
+                
+                # Small threshold increments
+                (0, 2),   # Step 15: exact gray + small threshold
+                (1, 2),   # Step 16: minimal gray + small threshold  
+                (2, 2),   # Step 17: baseline + small threshold
+                (3, 2),   # Step 18: slight gray + small threshold
+                (4, 2),   # Step 19: moderate + small threshold
+                (5, 2),   # Step 20: higher + small threshold
+                (6, 2),   # Step 21: very high + small threshold
+                (7, 2),   # Step 22: max gray + small threshold
+                
+                # Medium threshold with fine gray steps
+                (1, 3),   # Step 23: minimal gray + medium threshold
+                (2, 3),   # Step 24: baseline + medium threshold
+                (3, 3),   # Step 25: slight + medium threshold
+                (4, 3),   # Step 26: moderate + medium threshold
+                (5, 3),   # Step 27: higher + medium threshold
+                (6, 3),   # Step 28: very high + medium threshold
+                (7, 3),   # Step 29: max gray + medium threshold
+                (8, 3),   # Step 30: ultra-high + medium threshold
+                
+                # Higher thresholds for edge cases
+                (1, 4),   # Step 31: minimal gray + higher threshold
+                (2, 4),   # Step 32: baseline + higher threshold
+                (3, 4),   # Step 33: slight + higher threshold
+                (4, 4),   # Step 34: moderate + higher threshold
+                (8, 2),   # Step 35: ultra-high gray + small threshold
+                (9, 3),   # Step 36: extreme gray + medium threshold
+                (10, 4),  # Step 37: maximum tolerance
+                
+                # Extended range for difficult cases
+                (0, 3),   # Step 38: exact gray + medium threshold
+                (0, 4),   # Step 39: exact gray + higher threshold
+                (0, 5),   # Step 40: exact gray + high threshold
+                (8, 1),   # Step 41: ultra-high gray + minimal threshold
+                (9, 1),   # Step 42: extreme gray + minimal threshold
+                (9, 2),   # Step 43: extreme gray + small threshold
+                (8, 4),   # Step 44: ultra-high + higher threshold
+                (9, 4),   # Step 45: extreme + higher threshold
+                (10, 1),  # Step 46: max gray + minimal threshold
+                (10, 2),  # Step 47: max gray + small threshold
+                (10, 3),  # Step 48: max gray + medium threshold
+                (11, 3),  # Step 49: beyond max + medium
+                (12, 4),  # Step 50: ultra beyond + higher
+                
+                # High threshold patterns for very difficult recognition
+                (1, 5),   # Step 51: minimal gray + high threshold
+                (2, 5),   # Step 52: baseline + high threshold
+                (3, 5),   # Step 53: slight + high threshold
+                (4, 5),   # Step 54: moderate + high threshold
+                (5, 5),   # Step 55: higher + high threshold
+                (6, 5),   # Step 56: very high + high threshold
+                (7, 5),   # Step 57: max + high threshold
+                (0, 6),   # Step 58: exact gray + very high threshold
+                (1, 6),   # Step 59: minimal + very high threshold
+                (2, 6),   # Step 60: baseline + very high threshold
+                (3, 6),   # Step 61: slight + very high threshold
+                (8, 5),   # Step 62: ultra-high + high threshold
+                (9, 5),   # Step 63: extreme + high threshold
+                (10, 5),  # Step 64: max + high threshold
+                (0, 7),   # Step 65: exact gray + ultra-high threshold
+                (1, 7),   # Step 66: minimal + ultra-high threshold
+                (2, 7),   # Step 67: baseline + ultra-high threshold
+                (5, 6),   # Step 68: higher + very high threshold
+                (6, 6),   # Step 69: very high + very high threshold
+                (7, 6),   # Step 70: max + very high threshold
+                (11, 5),  # Step 71: beyond max + high threshold
+                (12, 5),  # Step 72: ultra beyond + high threshold
+                (13, 5),  # Step 73: extreme beyond + high threshold
+                (8, 6),   # Step 74: ultra-high + very high threshold
+                (9, 6),   # Step 75: extreme + very high threshold
+                (10, 6),  # Step 76: max + very high threshold
+                (0, 8),   # Step 77: exact gray + maximum threshold
+                (1, 8),   # Step 78: minimal + maximum threshold
+                (11, 6),  # Step 79: beyond max + very high threshold
+                (12, 6),  # Step 80: ultra beyond + very high threshold
+                (15, 7),  # Step 81: maximum gray + ultra-high threshold
+                (15, 8),  # Step 82: maximum gray + maximum threshold
             ]
             
             # Try each strategy once with max distance (2), select minimum distance match
@@ -177,7 +243,7 @@ class FuzzyRecognitionEngine:
                 
                 # Set max Hamming distance (10) and let fuzzy search find best match
                 original_distance = self.max_distance
-                self.max_distance = 10  # Search with max distance
+                self.max_distance = 50  # Search with max distance
                 
                 result, match_distance = self._try_recognition_with_tolerance_and_distance(np_value, gray_tolerance, threshold_tolerance)
                 strategy_time = (time.time() - strategy_start) * 1000
@@ -190,7 +256,7 @@ class FuzzyRecognitionEngine:
                     "attempt": len(log_entry["strategies_tried"]) + 1,
                     "gray_tolerance": gray_tolerance,
                     "threshold_tolerance": threshold_tolerance,
-                    "hamming_distance": match_distance if result else 10,  # Log actual match distance or max tried
+                    "hamming_distance": match_distance if result else 50,  # Log actual match distance or max tried
                     "time_ms": strategy_time,
                     "success": result is not None,
                     "result": result
