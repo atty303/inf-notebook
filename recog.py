@@ -468,6 +468,9 @@ class Recognition():
             if resource.musicselect is None:
                 return None
             
+            # === EXACT MATCHING (original master branch logic) ===
+            
+            # 1. infinitas exact matching
             resource_target = resource.musicselect['musicname']['infinitas']
             cropped = np_value[resource_target['trim']]
             filtereds = []
@@ -486,6 +489,7 @@ class Recognition():
                     return tabletarget[recogkey]
                 tabletarget = tabletarget[recogkey]
             
+            # 2. leggendaria exact matching
             resource_target = resource.musicselect['musicname']['leggendaria']
             cropped = np_value[resource_target['trim']]
             filtereds = []
@@ -504,11 +508,7 @@ class Recognition():
                     return tabletarget[recogkey]
                 tabletarget = tabletarget[recogkey]
 
-            # Original exact matching (primary) - Windows-compatible
-            import time
-            import json
-            
-            exact_start = time.time()
+            # 3. arcade exact matching
             resource_target = resource.musicselect['musicname']['arcade']
             thresholds = resource_target['thresholds']
             cropped = np_value[resource_target['trim']]
@@ -518,117 +518,57 @@ class Recognition():
             hexes = [line[::4]*8+line[1::4]*4+line[2::4]*2+line[3::4] for line in shrunk]
             recogkeys = [''.join([format(v, '0x') for v in line]) for line in hexes]
             tabletarget = resource_target['table']
-            
-            exact_result = None
             for recogkey in recogkeys:
                 if not recogkey in tabletarget.keys():
                     break
                 if type(tabletarget[recogkey]) is str:
-                    exact_result = tabletarget[recogkey]
-                    break
+                    return tabletarget[recogkey]
                 tabletarget = tabletarget[recogkey]
             
-            exact_time = (time.time() - exact_start) * 1000
-            
-            # Log exact matching performance
-            exact_log = {
-                "timestamp": int(time.time() * 1000),
-                "phase": "exact_recognition",
-                "success": exact_result is not None,
-                "result": exact_result,
-                "time_ms": exact_time,
-                "gray_pixels": int(np.count_nonzero(masked)),
-                "pattern_length": len(recogkeys)
-            }
-            
-            try:
-                with open('/tmp/fuzzy_performance.jsonl', 'a') as f:
-                    f.write(json.dumps(exact_log) + '\n')
-            except Exception:
-                pass
-            
-            if exact_result is not None:
-                return exact_result
-            
-            # Fuzzy matching fallback for Linux compatibility
-            fuzzy_result = Recognition.MusicSelect._try_fuzzy_recognition(np_value)
-            if fuzzy_result is not None:
-                return fuzzy_result
-            
-            # Recognition failed - save image for debugging
-            try:
-                import os
-                from PIL import Image
-                
-                debug_dir = '/tmp/recognition_failures'
-                os.makedirs(debug_dir, exist_ok=True)
-                
-                timestamp = int(time.time() * 1000)
-                
-                # Save as PNG images using PIL
-                image_path = f'{debug_dir}/failed_{timestamp}_full.png'
-                arcade_crop_path = f'{debug_dir}/failed_{timestamp}_arcade.png'
-                
-                # Convert BGR to RGB for PIL if needed
-                full_rgb = np_value[:,:,::-1] if len(np_value.shape) == 3 and np_value.shape[2] == 3 else np_value
-                arcade_rgb = cropped[:,:,::-1] if len(cropped.shape) == 3 and cropped.shape[2] == 3 else cropped
-                
-                # Save images
-                Image.fromarray(full_rgb.astype(np.uint8)).save(image_path)
-                Image.fromarray(arcade_rgb.astype(np.uint8)).save(arcade_crop_path)
-                
-                # Log failure with image paths
-                failure_log = {
-                    "timestamp": timestamp,
-                    "phase": "recognition_failure",
-                    "full_image_path": image_path,
-                    "arcade_crop_path": arcade_crop_path,
-                    "gray_pixels": int(np.count_nonzero(masked)),
-                    "pattern_length": len(recogkeys),
-                    "exact_failed": exact_result is None,
-                    "fuzzy_failed": fuzzy_result is None
-                }
-                
-                with open('/tmp/fuzzy_performance.jsonl', 'a') as f:
-                    f.write(json.dumps(failure_log) + '\n')
-                    
-            except Exception:
-                pass  # Silent fail for debug saving
+            # === FUZZY MATCHING (new addition) ===
+            if resource.fuzzy_search_enabled:
+                categories = ['infinitas', 'leggendaria', 'arcade']
+                for category in categories:
+                    fuzzy_result = Recognition.MusicSelect._try_fuzzy_recognition_category(np_value, category)
+                    if fuzzy_result:
+                        return fuzzy_result
             
             return None
         
+        
         @staticmethod
-        def _try_fuzzy_recognition(np_value):
-            """Try fuzzy recognition using pre-built binary database"""
+        def _try_fuzzy_recognition_category(np_value, category):
+            """Try fuzzy recognition for specified category using unified strategy system"""
             import time
             import numpy as np
             import json
             
             # Check if fuzzy search is enabled and database exists
+            binary_key = f'{category}_binary'
             if (not hasattr(resource.musicselect, 'get') or 
-                not resource.musicselect.get('musicname', {}).get('arcade_binary')):
+                not resource.musicselect.get('musicname', {}).get(binary_key)):
                 return None
             
             try:
                 start_time = time.time()
                 
                 # Get pre-built binary database
-                binary_db = resource.musicselect['musicname']['arcade_binary']
-                arcade_config = resource.musicselect['musicname']['arcade']
+                binary_db = resource.musicselect['musicname'][binary_key]
+                category_config = resource.musicselect['musicname'][category]
                 
                 # Log performance start
                 log_entry = {
                     "timestamp": int(start_time * 1000),
-                    "phase": "direct_fuzzy_recognition",
+                    "phase": f"{category}_fuzzy_recognition",
                     "success": False,
                     "result": None,
                     "total_time_ms": 0,
                     "strategies_tried": []
                 }
                 
-                # Try strategies in order of effectiveness
+                # Try strategies in order of effectiveness (shared across all categories)
                 tolerance_strategies = [
-                    (0, 0),   # Most effective
+                    (0, 0),   # Most effective - exact match first
                     (0, 1), (0, 2), (0, 6), (1, 4), (0, 7),
                     (2, 0), (1, 3), (3, 0), (4, 0), (1, 1), 
                     (5, 1), (2, 2), (0, 5)
@@ -639,7 +579,7 @@ class Recognition():
                     
                     result, distance = Recognition.MusicSelect._try_fuzzy_strategy(
                         np_value, gray_tolerance, threshold_tolerance, 
-                        binary_db, arcade_config
+                        binary_db, category_config, category
                     )
                     
                     strategy_time = (time.time() - strategy_start) * 1000
@@ -671,45 +611,66 @@ class Recognition():
                 return None
         
         @staticmethod
-        def _try_fuzzy_strategy(np_value, gray_tolerance, threshold_tolerance, binary_db, arcade_config):
-            """Try fuzzy recognition with specific tolerance values"""
+        def _try_fuzzy_strategy(np_value, gray_tolerance, threshold_tolerance, binary_db, category_config, category):
+            """Try fuzzy recognition with specific tolerance values for any category - DRY unified logic"""
             import numpy as np
             
-            # Apply arcade processing pipeline (same as exact matching)
-            arcade_trim = arcade_config['trim']
-            cropped = np_value[arcade_trim]
+            # Step 1: Category-specific preprocessing
+            category_trim = category_config['trim']
+            cropped = np_value[category_trim]
             
-            # Apply gray pixel filtering with tolerance
-            r, g, b = cropped[:,:,0], cropped[:,:,1], cropped[:,:,2]
-            is_gray = (np.abs(r - g) <= gray_tolerance) & (np.abs(r - b) <= gray_tolerance) & (np.abs(g - b) <= gray_tolerance)
-            masked = np.where(is_gray, r, 0)
+            if category == 'arcade':
+                # Arcade pipeline: gray filtering → threshold → shrinking
+                r, g, b = cropped[:,:,0], cropped[:,:,1], cropped[:,:,2]
+                is_gray = (np.abs(r - g) <= gray_tolerance) & (np.abs(r - b) <= gray_tolerance) & (np.abs(g - b) <= gray_tolerance)
+                masked = np.where(is_gray, r, 0)
+                
+                gray_pixel_count = np.count_nonzero(is_gray)
+                if gray_pixel_count == 0:
+                    return None, None
+                
+                # Apply threshold filtering
+                thresholds = category_config['thresholds']
+                bins = []
+                for i in range(masked.shape[0]):
+                    th_min = max(0, thresholds[i][0] - threshold_tolerance)
+                    th_max = min(255, thresholds[i][1] + threshold_tolerance)
+                    bin_row = np.where((th_min <= masked[i]) & (masked[i] <= th_max), 1, 0)
+                    bins.append(bin_row)
+                
+                bin_counts = [np.sum(bin_row) for bin_row in bins]
+                non_zero_bins = sum(1 for count in bin_counts if count > 0)
+                
+                if non_zero_bins < 3:
+                    return None, None
+                
+                # Shrinking step (consistent with original logic)
+                bins = [line[::2] & line[1::2] for line in bins]
+                
+            else:
+                # Infinitas/Leggendaria pipeline: RGB threshold filtering
+                thresholds = category_config['thresholds']
+                filtereds = []
+                for index in range(len(thresholds)):
+                    threshold = thresholds[index]
+                    min_threshold = max(0, threshold[0] - threshold_tolerance)
+                    max_threshold = min(255, threshold[1] + threshold_tolerance)
+                    masked_channel = np.where(
+                        (min_threshold <= cropped[:,:,index]) & (cropped[:,:,index] <= max_threshold), 
+                        1, 0
+                    )
+                    filtereds.append(masked_channel)
+                
+                # Combine all channels
+                bins = np.where((filtereds[0]==1) & (filtereds[1]==1) & (filtereds[2]==1), 1, 0)
+                
+                if np.count_nonzero(bins) == 0:
+                    return None, None
             
-            gray_pixel_count = np.count_nonzero(is_gray)
-            if gray_pixel_count == 0:
-                return None, 0
-            
-            # Threshold each row with tolerance
-            thresholds = arcade_config['thresholds']
-            bins = []
-            for i in range(masked.shape[0]):
-                th_min = max(0, thresholds[i][0] - threshold_tolerance)
-                th_max = min(255, thresholds[i][1] + threshold_tolerance)
-                bin_row = np.where((th_min <= masked[i]) & (masked[i] <= th_max), 1, 0)
-                bins.append(bin_row)
-            
-            bin_counts = [np.sum(bin_row) for bin_row in bins]
-            non_zero_bins = sum(1 for count in bin_counts if count > 0)
-            
-            if non_zero_bins < 3:
-                return None, 0
-            
-            # Generate binary patterns directly (skip unnecessary hex conversion)
-            shrunk = [line[::2]&line[1::2] for line in bins]
-            
-            # Convert directly to binary path for fuzzy search
+            # Step 2: Convert to binary path for fuzzy matching (unified for all categories)
             query_binary_path = []
-            for line in shrunk:
-                # Process line in 4-bit chunks directly to binary
+            for line in bins:
+                # Process line in 4-bit chunks to match binary database structure (original logic)
                 binary_chunks = []
                 for i in range(0, len(line), 4):
                     chunk = line[i:i+4]
@@ -719,14 +680,19 @@ class Recognition():
                     binary_chunks.extend(chunk)
                 query_binary_path.append(np.array(binary_chunks, dtype=np.uint8))
             
-            # Fuzzy search in pre-built database
+            # Step 3: Fuzzy search in pre-built database
             matches = Recognition.MusicSelect._fuzzy_search_direct(query_binary_path, binary_db)
             
             if matches:
                 best_match = matches[0]
                 return best_match['song_name'], best_match['total_distance']
             
-            return None, 0
+            return None, None
+        
+        @staticmethod
+        def _try_fuzzy_recognition(np_value):
+            """Legacy wrapper for arcade-specific fuzzy recognition"""
+            return Recognition.MusicSelect._try_fuzzy_recognition_category(np_value, 'arcade')
         
         @staticmethod
         def _fuzzy_search_direct(query_path, binary_db):

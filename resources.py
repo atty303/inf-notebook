@@ -86,26 +86,34 @@ class Resource():
                 logger.warning('Musicselect not loaded, skipping fuzzy database build')
                 return
                 
-            arcade_config = self.musicselect.get('musicname', {}).get('arcade')
-            if not arcade_config:
-                logger.warning('Arcade config not found, skipping fuzzy database build')
-                return
+            # Build binary databases for all categories
+            categories = ['arcade', 'infinitas', 'leggendaria']
+            total_built = 0
             
-            # Build binary database using existing logic
-            binary_db = self._convert_arcade_to_binary(arcade_config)
+            for category in categories:
+                category_config = self.musicselect.get('musicname', {}).get(category)
+                if not category_config:
+                    logger.warning(f'{category.title()} config not found, skipping')
+                    continue
+                
+                # Build binary database using category-specific logic
+                binary_db = self._convert_category_to_binary(category_config, category)
+                
+                # Store in musicselect structure
+                if 'musicname' not in self.musicselect:
+                    self.musicselect['musicname'] = {}
+                self.musicselect['musicname'][f'{category}_binary'] = binary_db
+                
+                logger.info(f'{category.title()} fuzzy binary database built: {len(binary_db)} entries')
+                total_built += len(binary_db)
             
-            # Store in musicselect structure
-            if 'musicname' not in self.musicselect:
-                self.musicselect['musicname'] = {}
-            self.musicselect['musicname']['arcade_binary'] = binary_db
-            
-            logger.info(f'Fuzzy binary database built: {len(binary_db)} entries')
+            logger.info(f'Total fuzzy binary database entries built: {total_built}')
             
         except Exception as e:
             logger.error(f'Failed to build fuzzy database: {e}')
     
-    def _convert_arcade_to_binary(self, arcade_config):
-        """Convert arcade config to binary database format"""
+    def _convert_category_to_binary(self, category_config, category):
+        """Convert category config to binary database format for fuzzy matching"""
         import numpy as np
         
         binary_db = {}
@@ -151,9 +159,9 @@ class Resource():
                 elif isinstance(value, dict):
                     process_table_recursive(value, path + [key])
         
-        # Process the arcade table
-        if 'table' in arcade_config:
-            process_table_recursive(arcade_config['table'])
+        # Process the category table
+        if 'table' in category_config:
+            process_table_recursive(category_config['table'])
         
         logger.debug(f'Converted {total_entries} entries to binary format')
         return binary_db
