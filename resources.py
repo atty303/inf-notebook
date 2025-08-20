@@ -62,6 +62,108 @@ class Resource():
         resourcename = f'musicselect{define.musicselect_recognition_version}'
         
         self.musicselect = load_resource_serialized(resourcename)
+        
+        # Build fuzzy recognition binary database if enabled
+        self._build_fuzzy_database()
+    
+    def _build_fuzzy_database(self):
+        """Build binary database for fuzzy recognition if enabled in settings"""
+        
+        # Check if fuzzy search is enabled using setting.py
+        try:
+            from setting import Setting
+            setting = Setting()
+            
+            if not setting.get_value('fuzzy_search_enabled'):
+                logger.debug('Fuzzy search disabled in settings')
+                return
+                
+        except Exception as e:
+            logger.warning(f'Could not read settings for fuzzy search: {e}')
+            return
+        
+        logger.info('Building fuzzy recognition binary database...')
+        
+        try:
+            # Import fuzzy engine helper functions
+            from fuzzy_recognition_engine import FuzzyRecognitionEngine
+            
+            # Get arcade configuration
+            if not hasattr(self, 'musicselect') or not self.musicselect:
+                logger.warning('Musicselect not loaded, skipping fuzzy database build')
+                return
+                
+            arcade_config = self.musicselect.get('musicname', {}).get('arcade')
+            if not arcade_config:
+                logger.warning('Arcade config not found, skipping fuzzy database build')
+                return
+            
+            # Build binary database using existing logic
+            binary_db = self._convert_arcade_to_binary(arcade_config)
+            
+            # Store in musicselect structure
+            if 'musicname' not in self.musicselect:
+                self.musicselect['musicname'] = {}
+            self.musicselect['musicname']['arcade_binary'] = binary_db
+            
+            logger.info(f'Fuzzy binary database built: {len(binary_db)} entries')
+            
+        except Exception as e:
+            logger.error(f'Failed to build fuzzy database: {e}')
+    
+    def _convert_arcade_to_binary(self, arcade_config):
+        """Convert arcade config to binary database format"""
+        import numpy as np
+        
+        binary_db = {}
+        total_entries = 0
+        
+        def hex_to_binary(hex_string: str) -> np.ndarray:
+            """Convert hex string to binary numpy array"""
+            try:
+                binary_bits = []
+                for hex_char in hex_string:
+                    if hex_char in '0123456789abcdef':
+                        decimal_val = int(hex_char, 16)
+                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                        binary_bits.extend(bits)
+                return np.array(binary_bits, dtype=np.uint8)
+            except:
+                return np.array([], dtype=np.uint8)
+        
+        def process_table_recursive(table, path=[]):
+            nonlocal total_entries
+            
+            for key, value in table.items():
+                if isinstance(value, str):
+                    # Leaf node - song name
+                    full_path = path + [key]
+                    
+                    # Convert all hex keys to binary
+                    binary_path = []
+                    for hex_key in full_path:
+                        binary_key = hex_to_binary(hex_key)
+                        binary_path.append(binary_key)
+                    
+                    # Store in binary database
+                    db_key = '_'.join(full_path)
+                    binary_db[db_key] = {
+                        'song_name': value,
+                        'binary_path': binary_path,
+                        'hex_path': full_path,
+                        'depth': len(full_path)
+                    }
+                    total_entries += 1
+                    
+                elif isinstance(value, dict):
+                    process_table_recursive(value, path + [key])
+        
+        # Process the arcade table
+        if 'table' in arcade_config:
+            process_table_recursive(arcade_config['table'])
+        
+        logger.debug(f'Converted {total_entries} entries to binary format')
+        return binary_db
     
     def load_resource_notesradar(self):
         resourcename = f'notesradar{define.notesradar_version}'

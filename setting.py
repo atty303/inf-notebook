@@ -62,6 +62,7 @@ default = {
         'source_name': 'Game Capture',
         'enabled': False,
     },
+    'fuzzy_search_enabled': True,
 }
 
 class Setting():

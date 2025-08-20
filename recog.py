@@ -524,15 +524,9 @@ class Recognition():
                 return exact_result
             
             # Fuzzy matching fallback for Linux compatibility
-            fuzzy_result = None
-            try:
-                from fuzzy_recognition_engine import load_fuzzy_recognition_engine
-                fuzzy_engine = load_fuzzy_recognition_engine()
-                fuzzy_result = fuzzy_engine.recognize(np_value)
-                if fuzzy_result is not None:
-                    return fuzzy_result
-            except Exception:
-                pass
+            fuzzy_result = Recognition.MusicSelect._try_fuzzy_recognition(np_value)
+            if fuzzy_result is not None:
+                return fuzzy_result
             
             # Recognition failed - save image for debugging
             try:
@@ -575,6 +569,210 @@ class Recognition():
                 pass  # Silent fail for debug saving
             
             return None
+        
+        @staticmethod
+        def _try_fuzzy_recognition(np_value):
+            """Try fuzzy recognition using pre-built binary database"""
+            import time
+            import numpy as np
+            import json
+            
+            # Check if fuzzy search is enabled and database exists
+            if (not hasattr(resource.musicselect, 'get') or 
+                not resource.musicselect.get('musicname', {}).get('arcade_binary')):
+                return None
+            
+            try:
+                start_time = time.time()
+                
+                # Get pre-built binary database
+                binary_db = resource.musicselect['musicname']['arcade_binary']
+                arcade_config = resource.musicselect['musicname']['arcade']
+                
+                # Log performance start
+                log_entry = {
+                    "timestamp": int(start_time * 1000),
+                    "phase": "direct_fuzzy_recognition",
+                    "success": False,
+                    "result": None,
+                    "total_time_ms": 0,
+                    "strategies_tried": []
+                }
+                
+                # Try strategies in order of effectiveness
+                tolerance_strategies = [
+                    (0, 0),   # Most effective
+                    (0, 1), (0, 2), (0, 6), (1, 4), (0, 7),
+                    (2, 0), (1, 3), (3, 0), (4, 0), (1, 1), 
+                    (5, 1), (2, 2), (0, 5)
+                ]
+                
+                for gray_tolerance, threshold_tolerance in tolerance_strategies:
+                    strategy_start = time.time()
+                    
+                    result, distance = Recognition.MusicSelect._try_fuzzy_strategy(
+                        np_value, gray_tolerance, threshold_tolerance, 
+                        binary_db, arcade_config
+                    )
+                    
+                    strategy_time = (time.time() - strategy_start) * 1000
+                    
+                    # Log strategy attempt
+                    strategy_log = {
+                        "gray_tolerance": gray_tolerance,
+                        "threshold_tolerance": threshold_tolerance,
+                        "time_ms": strategy_time,
+                        "success": result is not None,
+                        "result": result,
+                        "distance": distance if result else None
+                    }
+                    log_entry["strategies_tried"].append(strategy_log)
+                    
+                    if result is not None:
+                        log_entry["success"] = True
+                        log_entry["result"] = result
+                        log_entry["winning_distance"] = distance
+                        break
+                
+                # Write performance log
+                log_entry["total_time_ms"] = (time.time() - start_time) * 1000
+                Recognition.MusicSelect._write_fuzzy_performance_log(log_entry)
+                
+                return log_entry.get("result")
+                
+            except Exception as e:
+                return None
+        
+        @staticmethod
+        def _try_fuzzy_strategy(np_value, gray_tolerance, threshold_tolerance, binary_db, arcade_config):
+            """Try fuzzy recognition with specific tolerance values"""
+            import numpy as np
+            
+            # Apply arcade processing pipeline (same as exact matching)
+            arcade_trim = arcade_config['trim']
+            cropped = np_value[arcade_trim]
+            
+            # Apply gray pixel filtering with tolerance
+            r, g, b = cropped[:,:,0], cropped[:,:,1], cropped[:,:,2]
+            is_gray = (np.abs(r - g) <= gray_tolerance) & (np.abs(r - b) <= gray_tolerance) & (np.abs(g - b) <= gray_tolerance)
+            masked = np.where(is_gray, r, 0)
+            
+            gray_pixel_count = np.count_nonzero(is_gray)
+            if gray_pixel_count == 0:
+                return None, 0
+            
+            # Threshold each row with tolerance
+            thresholds = arcade_config['thresholds']
+            bins = []
+            for i in range(masked.shape[0]):
+                th_min = max(0, thresholds[i][0] - threshold_tolerance)
+                th_max = min(255, thresholds[i][1] + threshold_tolerance)
+                bin_row = np.where((th_min <= masked[i]) & (masked[i] <= th_max), 1, 0)
+                bins.append(bin_row)
+            
+            bin_counts = [np.sum(bin_row) for bin_row in bins]
+            non_zero_bins = sum(1 for count in bin_counts if count > 0)
+            
+            if non_zero_bins < 3:
+                return None, 0
+            
+            # Generate patterns (same as exact matching)
+            shrunk = [line[::2]&line[1::2] for line in bins]
+            hexes = [line[::4]*8+line[1::4]*4+line[2::4]*2+line[3::4] for line in shrunk]
+            recogkeys = [''.join([format(v, '0x') for v in line]) for line in hexes]
+            
+            # Convert query to binary
+            query_binary_path = []
+            for hex_key in recogkeys:
+                binary_key = Recognition.MusicSelect._hex_to_binary(hex_key)
+                query_binary_path.append(binary_key)
+            
+            # Fuzzy search in pre-built database
+            matches = Recognition.MusicSelect._fuzzy_search_direct(query_binary_path, binary_db)
+            
+            if matches:
+                best_match = matches[0]
+                return best_match['song_name'], best_match['total_distance']
+            
+            return None, 0
+        
+        @staticmethod
+        def _hex_to_binary(hex_string):
+            """Convert hex string to binary numpy array"""
+            import numpy as np
+            
+            try:
+                binary_bits = []
+                for hex_char in hex_string:
+                    if hex_char in '0123456789abcdef':
+                        decimal_val = int(hex_char, 16)
+                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                        binary_bits.extend(bits)
+                return np.array(binary_bits, dtype=np.uint8)
+            except:
+                return np.array([], dtype=np.uint8)
+        
+        @staticmethod
+        def _fuzzy_search_direct(query_path, binary_db):
+            """Direct fuzzy search using pre-built binary database"""
+            import numpy as np
+            
+            matches = []
+            max_distance = 50
+            
+            for db_key, db_entry in binary_db.items():
+                db_path = db_entry['binary_path']
+                
+                # Check path length
+                if len(query_path) != len(db_path):
+                    continue
+                
+                # Calculate Hamming distance
+                total_distance = 0
+                step_distances = []
+                
+                for query_step, db_step in zip(query_path, db_path):
+                    if len(query_step) != len(db_step):
+                        total_distance = float('inf')
+                        break
+                    
+                    step_distance = int(np.sum(query_step != db_step))
+                    step_distances.append(step_distance)
+                    total_distance += step_distance
+                    
+                    # Early termination
+                    if total_distance > max_distance:
+                        break
+                else:
+                    # All steps completed within threshold
+                    if total_distance <= max_distance:
+                        matches.append({
+                            'song_name': db_entry['song_name'],
+                            'total_distance': total_distance,
+                            'step_distances': step_distances
+                        })
+            
+            # Sort by distance
+            matches.sort(key=lambda x: x['total_distance'])
+            return matches
+        
+        @staticmethod
+        def _write_fuzzy_performance_log(log_entry):
+            """Write fuzzy performance log"""
+            import json
+            import os
+            import time
+            
+            try:
+                cache_dir = os.path.expanduser('~/.cache/inf-notebook')
+                os.makedirs(cache_dir, exist_ok=True)
+                session_id = int(time.time() * 1000)
+                log_path = os.path.join(cache_dir, f'direct_fuzzy_performance_{session_id}.jsonl')
+                
+                with open(log_path, 'a') as f:
+                    f.write(json.dumps(log_entry) + '\n')
+            except Exception:
+                pass
         
         @staticmethod
         def get_difficulty(np_value):
