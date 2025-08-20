@@ -78,10 +78,7 @@ class Resource():
         logger.info('Building fuzzy recognition binary database...')
         
         try:
-            # Import fuzzy engine helper functions
-            from fuzzy_recognition_engine import FuzzyRecognitionEngine
-            
-            # Get arcade configuration
+            # Check if musicselect is loaded
             if not hasattr(self, 'musicselect') or not self.musicselect:
                 logger.warning('Musicselect not loaded, skipping fuzzy database build')
                 return
