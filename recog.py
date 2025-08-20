@@ -676,16 +676,21 @@ class Recognition():
             if non_zero_bins < 3:
                 return None, 0
             
-            # Generate patterns (same as exact matching)
+            # Generate binary patterns directly (skip unnecessary hex conversion)
             shrunk = [line[::2]&line[1::2] for line in bins]
-            hexes = [line[::4]*8+line[1::4]*4+line[2::4]*2+line[3::4] for line in shrunk]
-            recogkeys = [''.join([format(v, '0x') for v in line]) for line in hexes]
             
-            # Convert query to binary
+            # Convert directly to binary path for fuzzy search
             query_binary_path = []
-            for hex_key in recogkeys:
-                binary_key = Recognition.MusicSelect._hex_to_binary(hex_key)
-                query_binary_path.append(binary_key)
+            for line in shrunk:
+                # Process line in 4-bit chunks directly to binary
+                binary_chunks = []
+                for i in range(0, len(line), 4):
+                    chunk = line[i:i+4]
+                    # Pad if necessary
+                    while len(chunk) < 4:
+                        chunk = np.append(chunk, 0)
+                    binary_chunks.extend(chunk)
+                query_binary_path.append(np.array(binary_chunks, dtype=np.uint8))
             
             # Fuzzy search in pre-built database
             matches = Recognition.MusicSelect._fuzzy_search_direct(query_binary_path, binary_db)
@@ -695,22 +700,6 @@ class Recognition():
                 return best_match['song_name'], best_match['total_distance']
             
             return None, 0
-        
-        @staticmethod
-        def _hex_to_binary(hex_string):
-            """Convert hex string to binary numpy array"""
-            import numpy as np
-            
-            try:
-                binary_bits = []
-                for hex_char in hex_string:
-                    if hex_char in '0123456789abcdef':
-                        decimal_val = int(hex_char, 16)
-                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
-                        binary_bits.extend(bits)
-                return np.array(binary_bits, dtype=np.uint8)
-            except:
-                return np.array([], dtype=np.uint8)
         
         @staticmethod
         def _fuzzy_search_direct(query_path, binary_db):
