@@ -137,104 +137,34 @@ class FuzzyRecognitionEngine:
         }
         
         try:
-            # Comprehensive fine-grained strategies with micro-steps
+            # Optimized strategy order based on actual usage statistics
+            # Strategies sorted by success count (descending) with unused strategies removed
             tolerance_strategies = [
-                # Ultra-fine grain for critical small thresholds
-                (0, 0),   # Step 0: Windows exact match attempt
-                (1, 0),   # Step 1: minimal gray tolerance
-                (2, 0),   # Step 2: baseline gray only
-                (3, 0),   # Step 3: slight gray relaxation
-                (4, 0),   # Step 4: moderate gray only
-                (5, 0),   # Step 5: higher gray only
-                (6, 0),   # Step 6: very high gray only
+                # Most successful strategies (>90% of all successes)
+                (0, 0),   # 1144 successes (95.2% success rate)
+                (0, 1),   # 24 successes
+                (0, 2),   # 10 successes
+                (0, 6),   # 6 successes
+                (1, 4),   # 4 successes
+                (0, 7),   # 4 successes
                 
-                # Threshold micro-increments with minimal gray
-                (0, 1),   # Step 7: exact gray + minimal threshold
-                (1, 1),   # Step 8: minimal both tolerances 
-                (2, 1),   # Step 9: baseline + minimal threshold
-                (3, 1),   # Step 10: slight gray + minimal threshold
-                (4, 1),   # Step 11: moderate gray + minimal threshold
-                (5, 1),   # Step 12: higher gray + minimal threshold
-                (6, 1),   # Step 13: very high gray + minimal threshold
-                (7, 1),   # Step 14: max gray + minimal threshold
+                # Occasionally successful strategies
+                (2, 0),   # 2 successes (baseline gray only)
+                (1, 3),   # 2 successes
+                (3, 0),   # 1 success (slight gray relaxation)
+                (4, 0),   # 1 success (moderate gray only)
+                (1, 1),   # 1 success (minimal both)
+                (5, 1),   # 1 success
+                (2, 2),   # 1 success
+                (0, 5),   # 1 success
                 
-                # Small threshold increments
-                (0, 2),   # Step 15: exact gray + small threshold
-                (1, 2),   # Step 16: minimal gray + small threshold  
-                (2, 2),   # Step 17: baseline + small threshold
-                (3, 2),   # Step 18: slight gray + small threshold
-                (4, 2),   # Step 19: moderate + small threshold
-                (5, 2),   # Step 20: higher + small threshold
-                (6, 2),   # Step 21: very high + small threshold
-                (7, 2),   # Step 22: max gray + small threshold
-                
-                # Medium threshold with fine gray steps
-                (1, 3),   # Step 23: minimal gray + medium threshold
-                (2, 3),   # Step 24: baseline + medium threshold
-                (3, 3),   # Step 25: slight + medium threshold
-                (4, 3),   # Step 26: moderate + medium threshold
-                (5, 3),   # Step 27: higher + medium threshold
-                (6, 3),   # Step 28: very high + medium threshold
-                (7, 3),   # Step 29: max gray + medium threshold
-                (8, 3),   # Step 30: ultra-high + medium threshold
-                
-                # Higher thresholds for edge cases
-                (1, 4),   # Step 31: minimal gray + higher threshold
-                (2, 4),   # Step 32: baseline + higher threshold
-                (3, 4),   # Step 33: slight + higher threshold
-                (4, 4),   # Step 34: moderate + higher threshold
-                (8, 2),   # Step 35: ultra-high gray + small threshold
-                (9, 3),   # Step 36: extreme gray + medium threshold
-                (10, 4),  # Step 37: maximum tolerance
-                
-                # Extended range for difficult cases
-                (0, 3),   # Step 38: exact gray + medium threshold
-                (0, 4),   # Step 39: exact gray + higher threshold
-                (0, 5),   # Step 40: exact gray + high threshold
-                (8, 1),   # Step 41: ultra-high gray + minimal threshold
-                (9, 1),   # Step 42: extreme gray + minimal threshold
-                (9, 2),   # Step 43: extreme gray + small threshold
-                (8, 4),   # Step 44: ultra-high + higher threshold
-                (9, 4),   # Step 45: extreme + higher threshold
-                (10, 1),  # Step 46: max gray + minimal threshold
-                (10, 2),  # Step 47: max gray + small threshold
-                (10, 3),  # Step 48: max gray + medium threshold
-                (11, 3),  # Step 49: beyond max + medium
-                (12, 4),  # Step 50: ultra beyond + higher
-                
-                # High threshold patterns for very difficult recognition
-                (1, 5),   # Step 51: minimal gray + high threshold
-                (2, 5),   # Step 52: baseline + high threshold
-                (3, 5),   # Step 53: slight + high threshold
-                (4, 5),   # Step 54: moderate + high threshold
-                (5, 5),   # Step 55: higher + high threshold
-                (6, 5),   # Step 56: very high + high threshold
-                (7, 5),   # Step 57: max + high threshold
-                (0, 6),   # Step 58: exact gray + very high threshold
-                (1, 6),   # Step 59: minimal + very high threshold
-                (2, 6),   # Step 60: baseline + very high threshold
-                (3, 6),   # Step 61: slight + very high threshold
-                (8, 5),   # Step 62: ultra-high + high threshold
-                (9, 5),   # Step 63: extreme + high threshold
-                (10, 5),  # Step 64: max + high threshold
-                (0, 7),   # Step 65: exact gray + ultra-high threshold
-                (1, 7),   # Step 66: minimal + ultra-high threshold
-                (2, 7),   # Step 67: baseline + ultra-high threshold
-                (5, 6),   # Step 68: higher + very high threshold
-                (6, 6),   # Step 69: very high + very high threshold
-                (7, 6),   # Step 70: max + very high threshold
-                (11, 5),  # Step 71: beyond max + high threshold
-                (12, 5),  # Step 72: ultra beyond + high threshold
-                (13, 5),  # Step 73: extreme beyond + high threshold
-                (8, 6),   # Step 74: ultra-high + very high threshold
-                (9, 6),   # Step 75: extreme + very high threshold
-                (10, 6),  # Step 76: max + very high threshold
-                (0, 8),   # Step 77: exact gray + maximum threshold
-                (1, 8),   # Step 78: minimal + maximum threshold
-                (11, 6),  # Step 79: beyond max + very high threshold
-                (12, 6),  # Step 80: ultra beyond + very high threshold
-                (15, 7),  # Step 81: maximum gray + ultra-high threshold
-                (15, 8),  # Step 82: maximum gray + maximum threshold
+                # Additional threshold levels for edge cases
+                # (keeping only patterns that showed potential based on distance patterns)
+                (0, 3),   # exact gray + medium threshold
+                (0, 4),   # exact gray + higher threshold
+                (0, 8),   # exact gray + maximum threshold
+                (1, 5),   # minimal gray + high threshold
+                (2, 5),   # baseline + high threshold
             ]
             
             # Try each strategy once with max distance (2), select minimum distance match

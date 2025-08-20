@@ -1,5 +1,4 @@
 import numpy as np
-from PIL import Image
 from logging import getLogger
 
 logger = getLogger().getChild('screenshot_obs')
@@ -43,6 +42,7 @@ class OBSCapture:
         import platform
         import uuid
         from pathlib import Path
+        
         
         # Connect on first use if not already connected
         if not self.connected and obs_available:
@@ -104,12 +104,57 @@ class OBSCapture:
                 os.unlink(temp_path)
                 return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
             
-            image = Image.open(temp_path)
+            # Direct BMP to NumPy conversion - no PIL dependencies
             
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            with open(temp_path, 'rb') as f:
+                # Read BMP header
+                signature = f.read(2)
+                if signature != b'BM':
+                    logger.error(f"Invalid BMP signature: {signature}")
+                    return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
+                
+                # Read file size and data offset
+                file_size = int.from_bytes(f.read(4), 'little')
+                f.read(4)  # Skip reserved bytes
+                data_offset = int.from_bytes(f.read(4), 'little')
+                
+                # Read DIB header
+                dib_header_size = int.from_bytes(f.read(4), 'little')
+                width = int.from_bytes(f.read(4), 'little')
+                height = int.from_bytes(f.read(4), 'little')
+                planes = int.from_bytes(f.read(2), 'little')
+                bits_per_pixel = int.from_bytes(f.read(2), 'little')
+                
+                if bits_per_pixel != 24 or planes != 1:
+                    logger.error(f'Unsupported BMP format: {bits_per_pixel}bpp, planes={planes}')
+                    return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
+                
+                # Calculate and read pixel data
+                bytes_per_row = ((width * 3 + 3) // 4) * 4  # 4-byte aligned
+                expected_size = bytes_per_row * abs(height)
+                
+                f.seek(data_offset)
+                raw_data = f.read(expected_size)
+                
+                if len(raw_data) < expected_size:
+                    logger.error(f'BMP data incomplete: got {len(raw_data)}, expected {expected_size}')
+                    return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
+                
+                # Create numpy array from raw BMP data
+                img_array = np.frombuffer(raw_data, dtype=np.uint8)[:expected_size]
+                img_array = img_array.reshape((abs(height), bytes_per_row))
+                
+                # Remove padding and convert to RGB
+                img_array = img_array[:, :width*3].reshape((abs(height), width, 3))
+                
+                # Handle bitmap orientation and convert BGR to RGB
+                if height < 0:
+                    height = abs(height)  # Top-down bitmap
+                else:
+                    img_array = img_array[::-1]  # Bottom-up bitmap - flip
+                
+                img_array = img_array[:, :, ::-1]  # BGR to RGB
             
-            img_array = np.array(image)
             
             # Clean up temporary file
             try:
@@ -147,6 +192,7 @@ class OBSCapture:
             import traceback
             logger.error(f'Traceback: {traceback.format_exc()}')
             return np.zeros((self.original_height, self.original_width, 3), dtype=np.uint8)
+    
     
     def __del__(self):
         if self.ws:
