@@ -426,14 +426,41 @@ class Recognition():
         def get_version(np_value):
             if resource.musicselect is None:
                 return None
+            
+            # Check if fuzzy search is enabled for tolerance
+            use_tolerance = resource.fuzzy_search_enabled
+            
             for table in resource.musicselect['version']:
                 cropped = np_value[table['trim']]
                 reshaped = cropped.reshape(cropped.shape[0]*cropped.shape[1], cropped.shape[2])
                 hexes = [''.join([format(b, '02x') for b in point]) for point in reshaped]
                 tablekey = ''.join(hexes)
 
+                # Try exact match first
                 if tablekey in table['table'].keys():
                     return table['table'][tablekey]
+                
+                # If fuzzy search enabled, try tolerance-based matching
+                if use_tolerance:
+                    # Convert hex string to numpy array for comparison
+                    query_bytes = bytes.fromhex(tablekey)
+                    query_array = np.frombuffer(query_bytes, dtype=np.uint8)
+                    
+                    # Try fuzzy matching against all table keys
+                    for stored_key in table['table'].keys():
+                        try:
+                            stored_bytes = bytes.fromhex(stored_key)
+                            stored_array = np.frombuffer(stored_bytes, dtype=np.uint8)
+                            
+                            # Calculate color difference tolerance
+                            if len(query_array) == len(stored_array):
+                                # Allow small color value differences (tolerance of 10 per channel)
+                                diff = np.abs(query_array.astype(np.int16) - stored_array.astype(np.int16))
+                                if np.all(diff <= 10):
+                                    return table['table'][stored_key]
+                        except (ValueError, TypeError):
+                            continue
+                            
             return None
 
         @staticmethod

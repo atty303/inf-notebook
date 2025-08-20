@@ -63,6 +63,7 @@ default = {
         'enabled': False,
     },
     'fuzzy_search_enabled': True,
+    'gui_update_interval': 1.0,
 }
 
 class Setting():
@@ -339,3 +340,15 @@ class Setting():
     @obs_websocket.setter
     def obs_websocket(self, value):
         self.set_value('obs_websocket', value)
+    
+    @property
+    def gui_update_interval(self):
+        '''GUI更新間隔（秒）
+        
+        メインループでキューを処理する間隔を設定します。
+        '''
+        return self.get_value('gui_update_interval')
+    
+    @gui_update_interval.setter
+    def gui_update_interval(self, value: float):
+        self.set_value('gui_update_interval', value)

@@ -25,33 +25,31 @@ class Screenshot:
     screentable = load_resource_serialized('get_screen')
     np_value = None
 
-    def __init__(self):
+    def __init__(self, setting_instance):
         """
         Initialize Screenshot with backend selection based on settings
         """
-        from setting import Setting
-        setting = Setting()
-        
-        self.use_obs = setting.obs_websocket['enabled']
+        self.use_obs = setting_instance.obs_websocket['enabled']
+        self.fuzzy_search_enabled = setting_instance.get_value('fuzzy_search_enabled')
         
         if self.use_obs:
             from screenshot_obs import OBSCapture
             logger.info('Using OBS WebSocket for screenshot capture')
             self.capture = OBSCapture(
                 define.width, define.height,
-                host=setting.obs_websocket['host'],
-                port=setting.obs_websocket['port'],
-                password=setting.obs_websocket['password'],
-                source_name=setting.obs_websocket['source_name']
+                host=setting_instance.obs_websocket['host'],
+                port=setting_instance.obs_websocket['port'],
+                password=setting_instance.obs_websocket['password'],
+                source_name=setting_instance.obs_websocket['source_name']
             )
             self.xy = (0, 0)  # Fixed position for OBS
             self.checkscreens = [
                 (screen, (areas['left'], areas['top']),
                  OBSCapture(areas['width'], areas['height'], 
-                           host=setting.obs_websocket['host'],
-                           port=setting.obs_websocket['port'],
-                           password=setting.obs_websocket['password'],
-                           source_name=setting.obs_websocket['source_name']), 
+                           host=setting_instance.obs_websocket['host'],
+                           port=setting_instance.obs_websocket['port'],
+                           password=setting_instance.obs_websocket['password'],
+                           source_name=setting_instance.obs_websocket['source_name']), 
                  self.screentable[screen]) 
                 for screen, areas in define.screens.items()
             ]
@@ -99,12 +97,16 @@ class Screenshot:
         if self.xy is None:
             return None
         
+        # Check if fuzzy search is enabled for tolerance
+        tolerance = 10 if self.fuzzy_search_enabled else 0  # Allow small color value differences on Linux
+        
         results = []
         for screen, pos, capture, value in self.checkscreens:
             x = self.xy[0] + pos[0]
             y = self.xy[1] + pos[1]
 
-            if np.sum(capture.shot(x, y)) == value:
+            actual_sum = int(np.sum(capture.shot(x, y), dtype=np.int64))
+            if abs(actual_sum - value) <= tolerance:
                 results.append(screen)
         
         if len(results) != 1:

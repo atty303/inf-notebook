@@ -30,6 +30,7 @@ images_loading_filepath = os.path.join(images_dirpath, 'loading.png')
 
 class Resource():
     def __init__(self):
+        self.fuzzy_search_enabled = False  # Will be set later by _build_fuzzy_database
         self.is_savable = load_resource_serialized('is_savable')
         self.play_side = load_resource_numpy('play_side')
         self.dead = load_resource_numpy('dead')
@@ -64,22 +65,14 @@ class Resource():
         self.musicselect = load_resource_serialized(resourcename)
         
         # Build fuzzy recognition binary database if enabled
-        self._build_fuzzy_database()
+        # Will be called later from main.pyw with setting instance
     
-    def _build_fuzzy_database(self):
+    def _build_fuzzy_database(self, setting_instance):
         """Build binary database for fuzzy recognition if enabled in settings"""
-        
-        # Check if fuzzy search is enabled using setting.py
-        try:
-            from setting import Setting
-            setting = Setting()
             
-            if not setting.get_value('fuzzy_search_enabled'):
-                logger.debug('Fuzzy search disabled in settings')
-                return
-                
-        except Exception as e:
-            logger.warning(f'Could not read settings for fuzzy search: {e}')
+        self.fuzzy_search_enabled = setting_instance.get_value('fuzzy_search_enabled')
+        if not self.fuzzy_search_enabled:
+            logger.debug('Fuzzy search disabled in settings')
             return
         
         logger.info('Building fuzzy recognition binary database...')

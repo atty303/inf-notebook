@@ -42,6 +42,9 @@ from version import version
 from general import get_imagevalue,save_imagevalue,imagesize
 from define import define
 from resources import resource,play_sound_result,check_latest
+
+# Build fuzzy recognition database after resource loading with setting instance
+resource._build_fuzzy_database(setting)
 from screenshot import Screen,Screenshot
 from recog import Recognition as recog
 from raw_image import save_raw
@@ -126,8 +129,28 @@ class ThreadMain(Thread):
     def run(self):
         self.sleep_time = thread_time_wait_nonactive
         self.queues['log'].put('start thread')
+        
+        # Initialize main loop logging with versioning
+        from main_loop_logger import MainLoopLogger
+        self.logger = MainLoopLogger()
+        self.queues['log'].put(f'start thread with logger v{self.logger.get_code_version()}')
+        
         while not self.event_close.wait(timeout=self.sleep_time):
+            loop_start = time.time()
             self.routine()
+            loop_time = (time.time() - loop_start) * 1000
+            
+            # Log main loop cycle using logger class
+            self.logger.log_main_loop_cycle(
+                sleep_time=self.sleep_time,
+                loop_time_ms=loop_time,
+                handle=self.handle,
+                active=self.active,
+                waiting=self.waiting,
+                musicselect=self.musicselect,
+                screen_latest=self.screen_latest,
+                xy=(screenshot.xy[0], screenshot.xy[1]) if screenshot.xy else None
+            )
 
     def routine(self):
         # Traditional window detection mode (works with both real and dummy detectors)
@@ -177,54 +200,147 @@ class ThreadMain(Thread):
             self.queues['messages'].put('hotkey_start')
         
         screenshot.xy = (rect.left, rect.top)
+        screen_start = time.time()
         screen = screenshot.get_screen()
+        screen_time = (time.time() - screen_start) * 1000
+
+        # Log screen detection details using logger class
+        self.logger.log_screen_detection(
+            screen_result=screen,
+            screen_previous=self.screen_latest,
+            detection_time_ms=screen_time,
+            rect=(rect.left, rect.top, rect.right, rect.bottom) if rect else None,
+            xy=(rect.left, rect.top) if rect else None
+        )
 
         if screen != self.screen_latest:
+            previous_screen = self.screen_latest
             self.confirmed_somescreen = False
             self.confirmed_processable = False
             self.processed = False
             self.screen_latest = screen
+            
+            # Log screen transition using logger class
+            self.logger.log_screen_transition(
+                from_screen=previous_screen,
+                to_screen=screen,
+                active=self.active,
+                waiting=self.waiting,
+                musicselect=self.musicselect
+            )
 
         if screen == 'loading':
             if not self.waiting:
+                old_sleep_time = self.sleep_time
                 self.waiting = True
                 self.musicselect = False
                 self.sleep_time = thread_time_wait_loading
                 self.queues['log'].put(f'detect loading: start waiting: {self.sleep_time}')
                 self.queues['messages'].put('detect_loading')
+                
+                # Log sleep time change using logger class
+                self.logger.log_sleep_time_change(
+                    reason="loading_detected",
+                    old_sleep_time=old_sleep_time,
+                    new_sleep_time=self.sleep_time,
+                    screen=screen,
+                    waiting=self.waiting,
+                    musicselect=self.musicselect
+                )
             return
             
         if self.waiting:
+            old_sleep_time = self.sleep_time
             self.waiting = False
             self.sleep_time = thread_time_normal
             self.queues['log'].put(f'escape loading: end waiting: {self.sleep_time}')
             self.queues['messages'].put('escape_loading')
+            
+            # Log sleep time change using logger class
+            self.logger.log_sleep_time_change(
+                reason="loading_escape",
+                old_sleep_time=old_sleep_time,
+                new_sleep_time=self.sleep_time,
+                screen=screen,
+                waiting=self.waiting,
+                musicselect=self.musicselect
+            )
 
         # ここから先はローディング中じゃないときのみ
         
         if screen != 'music_select' and self.musicselect:
             # 画面が選曲から抜けたとき
+            old_sleep_time = self.sleep_time
             self.musicselect = False
             self.sleep_time = thread_time_normal
             self.queues['log'].put(f'screen out music select: {self.sleep_time}')
+            
+            # Log sleep time change using logger class
+            self.logger.log_sleep_time_change(
+                reason="music_select_exit",
+                old_sleep_time=old_sleep_time,
+                new_sleep_time=self.sleep_time,
+                screen=screen,
+                waiting=self.waiting,
+                musicselect=self.musicselect
+            )
 
         shotted = False
         if screen == 'music_select':
             if not self.musicselect:
                 # 画面が選曲に入ったとき
+                old_sleep_time = self.sleep_time
                 self.musicselect = True
                 self.sleep_time = thread_time_musicselect
                 self.queues['log'].put(f'screen in music select: {self.sleep_time}')
+                
+                # Log sleep time change using logger class
+                self.logger.log_sleep_time_change(
+                    reason="music_select_enter",
+                    old_sleep_time=old_sleep_time,
+                    new_sleep_time=self.sleep_time,
+                    screen=screen,
+                    waiting=self.waiting,
+                    musicselect=self.musicselect
+                )
 
             screenshot.shot()
             shotted = True
 
+            # Log screenshot attempt using logger class
+            self.logger.log_screenshot_taken(
+                screen=screen,
+                shot_success=screenshot.np_value is not None,
+                image_shape=screenshot.np_value.shape if screenshot.np_value is not None else None
+            )
+
             trimmed = screenshot.np_value[define.musicselect_trimarea_np]
-            if recog.MusicSelect.get_version(trimmed) is not None:
+            version_result = recog.MusicSelect.get_version(trimmed)
+            
+            # Log version detection results using logger class
+            self.logger.log_version_detection(
+                success=version_result is not None,
+                version=version_result,
+                screen=screen,
+                active=self.active,
+                musicselect=self.musicselect
+            )
+            
+            if version_result is not None:
                 try:
                     self.queues['musicselect_screen'].put(trimmed, block=False)
+                    
+                    # Log successful queue submission using logger class
+                    self.logger.log_musicselect_queue_submit(
+                        version=version_result,
+                        queue_size=self.queues['musicselect_screen'].qsize()
+                    )
+                        
                 except Full as ex:
-                    pass
+                    # Log queue full events using logger class
+                    self.logger.log_musicselect_queue_full(
+                        version=version_result
+                    )
 
             return
 
@@ -240,8 +356,19 @@ class ThreadMain(Thread):
             self.confirmed_somescreen = True
             if screen == 'result':
                 # リザルトのときのみ、スレッド周期を短くして取込タイミングを高速化する
+                old_sleep_time = self.sleep_time
                 self.sleep_time = thread_time_result
                 self.queues['log'].put(f'screen in result: {self.sleep_time}')
+                
+                # Log sleep time change using logger class
+                self.logger.log_sleep_time_change(
+                    reason="result_screen_enter",
+                    old_sleep_time=old_sleep_time,
+                    new_sleep_time=self.sleep_time,
+                    screen=screen,
+                    waiting=self.waiting,
+                    musicselect=self.musicselect
+                )
         
         if self.processed:
             return
@@ -268,9 +395,21 @@ class ThreadMain(Thread):
             except Full as ex:
                 pass
 
+            old_sleep_time = self.sleep_time
             self.sleep_time = thread_time_normal
             self.queues['log'].put(f'processing result screen: {self.sleep_time}')
             self.processed = True
+            
+            # Log sleep time change using logger class
+            self.logger.log_sleep_time_change(
+                reason="result_processing_complete",
+                old_sleep_time=old_sleep_time,
+                new_sleep_time=self.sleep_time,
+                screen=screen,
+                waiting=self.waiting,
+                musicselect=self.musicselect,
+                processed=self.processed
+            )
 
 class GuiApi():
     '''メイン画面のAPIクラス
@@ -1347,7 +1486,7 @@ class ScoreSelection():
 
 def mainloop():
     import platform
-    while not event_close.wait(timeout=1):
+    while not event_close.wait(timeout=setting.gui_update_interval):
         # Skip window state check on Linux since xdg-open doesn't allow window control
         if platform.system() != 'Linux' and not newwindow.is_shown():
             return
@@ -1982,7 +2121,7 @@ if __name__ == '__main__':
 
     force_upload_enable: bool = False
 
-    screenshot = Screenshot()
+    screenshot = Screenshot(setting)
 
     notebook_recent = NotebookRecent(recent_maxcount)
     notebook_summary = NotebookSummary()
