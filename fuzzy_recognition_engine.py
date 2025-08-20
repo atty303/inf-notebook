@@ -20,7 +20,13 @@ class FuzzyRecognitionEngine:
         self.arcade_config = arcade_config
         self.binary_db = None
         self.max_distance = 1  # Default: single-bit tolerance
-        self.performance_log_path = '/tmp/fuzzy_performance.jsonl'
+        
+        # Performance logging with session-specific files in cache directory
+        cache_dir = os.path.expanduser('~/.cache/inf-notebook')
+        os.makedirs(cache_dir, exist_ok=True)
+        session_id = int(time.time() * 1000)
+        self.performance_log_path = os.path.join(cache_dir, f'fuzzy_performance_{session_id}.jsonl')
+        
         self._build_binary_database()
     
     def _hex_to_binary(self, hex_string: str) -> np.ndarray:
