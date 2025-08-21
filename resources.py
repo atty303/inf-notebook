@@ -106,6 +106,12 @@ class Resource():
             
             logger.info(f'Total fuzzy binary database entries built: {total_built}')
             
+            # Build Result screen fuzzy databases
+            self._build_result_fuzzy_database()
+            
+            # Build Details (options) fuzzy databases
+            self._build_details_fuzzy_database()
+            
         except Exception as e:
             logger.error(f'Failed to build fuzzy database: {e}')
     
@@ -162,6 +168,238 @@ class Resource():
         
         logger.debug(f'Converted {total_entries} entries to binary format')
         return binary_db
+    
+    def _build_result_fuzzy_database(self):
+        """Build binary database for Result screen fuzzy recognition"""
+        try:
+            # Check if informations is loaded
+            if not hasattr(self, 'informations') or not self.informations:
+                logger.warning('Informations not loaded, skipping Result fuzzy database build')
+                return
+            
+            result_total = 0
+            
+            # Build fuzzy database for music recognition (red/blue/gray tables)
+            if 'music' in self.informations and 'tables' in self.informations['music']:
+                music_tables = self.informations['music']['tables']
+                
+                for color in ['red', 'blue', 'gray']:
+                    if color in music_tables:
+                        binary_db = self._convert_result_music_table_to_binary(music_tables[color], color)
+                        
+                        # Store in informations structure
+                        if 'music_binary' not in self.informations['music']:
+                            self.informations['music']['music_binary'] = {}
+                        self.informations['music']['music_binary'][color] = binary_db
+                        
+                        logger.info(f'Result music {color} fuzzy binary database built: {len(binary_db)} entries')
+                        result_total += len(binary_db)
+            
+            # Build fuzzy database for play_mode recognition
+            if 'play_mode' in self.informations and 'table' in self.informations['play_mode']:
+                binary_db = self._convert_result_simple_table_to_binary(self.informations['play_mode']['table'], 'play_mode')
+                self.informations['play_mode']['binary'] = binary_db
+                logger.info(f'Result play_mode fuzzy binary database built: {len(binary_db)} entries')
+                result_total += len(binary_db)
+            
+            # Build fuzzy database for difficulty recognition
+            if 'difficulty' in self.informations and 'table' in self.informations['difficulty']:
+                difficulty_binary = {}
+                difficulty_table = self.informations['difficulty']['table']
+                
+                # Convert difficulty color keys to binary
+                if 'difficulty' in difficulty_table:
+                    difficulty_binary['difficulty'] = self._convert_result_color_table_to_binary(difficulty_table['difficulty'], 'difficulty')
+                    result_total += len(difficulty_binary['difficulty'])
+                
+                # Convert level tables to binary
+                if 'level' in difficulty_table:
+                    difficulty_binary['level'] = {}
+                    for diff_name, level_table in difficulty_table['level'].items():
+                        difficulty_binary['level'][diff_name] = self._convert_result_simple_table_to_binary(level_table, f'level_{diff_name}')
+                        result_total += len(difficulty_binary['level'][diff_name])
+                
+                self.informations['difficulty']['binary'] = difficulty_binary
+                logger.info(f'Result difficulty fuzzy binary database built: {result_total - (len(difficulty_binary.get("difficulty", {})))} entries')
+            
+            # Build fuzzy database for notes recognition  
+            if 'notes' in self.informations and 'table' in self.informations['notes']:
+                binary_db = self._convert_result_simple_table_to_binary(self.informations['notes']['table'], 'notes')
+                self.informations['notes']['binary'] = binary_db
+                logger.info(f'Result notes fuzzy binary database built: {len(binary_db)} entries')
+                result_total += len(binary_db)
+            
+            logger.info(f'Total Result fuzzy binary database entries built: {result_total}')
+            
+        except Exception as e:
+            logger.error(f'Failed to build Result fuzzy database: {e}')
+    
+    def _convert_result_music_table_to_binary(self, music_table, color):
+        """Convert Result music table (hierarchical with row numbers) to binary database"""
+        import numpy as np
+        
+        binary_db = {}
+        
+        def hex_to_binary(hex_string: str) -> np.ndarray:
+            """Convert hex string to binary numpy array"""
+            try:
+                binary_bits = []
+                for hex_char in hex_string:
+                    if hex_char in '0123456789abcdef':
+                        decimal_val = int(hex_char, 16)
+                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                        binary_bits.extend(bits)
+                return np.array(binary_bits, dtype=np.uint8)
+            except:
+                return np.array([], dtype=np.uint8)
+        
+        def process_music_table_recursive(table, path=[]):
+            for key, value in table.items():
+                if isinstance(value, str):
+                    # Leaf node - song name
+                    full_path = path + [key]
+                    
+                    # Convert keys to binary (skip row numbers like "00", "01")
+                    binary_path = []
+                    for path_key in full_path:
+                        if len(path_key) > 2:  # Skip row number keys like "00", "01"
+                            hex_part = path_key[2:]  # Remove row number prefix
+                            if hex_part:  # Only process if there's hex content
+                                binary_key = hex_to_binary(hex_part)
+                                binary_path.append(binary_key)
+                    
+                    if binary_path:  # Only store if we have binary data
+                        db_key = '_'.join(full_path)
+                        binary_db[db_key] = {
+                            'song_name': value,
+                            'binary_path': binary_path,
+                            'original_path': full_path,
+                            'color': color
+                        }
+                
+                elif isinstance(value, dict):
+                    process_music_table_recursive(value, path + [key])
+        
+        process_music_table_recursive(music_table)
+        return binary_db
+    
+    def _convert_result_simple_table_to_binary(self, simple_table, table_type):
+        """Convert simple hex key->value table to binary database"""
+        import numpy as np
+        
+        binary_db = {}
+        
+        def hex_to_binary(hex_string: str) -> np.ndarray:
+            try:
+                binary_bits = []
+                for hex_char in hex_string:
+                    if hex_char in '0123456789abcdef':
+                        decimal_val = int(hex_char, 16)
+                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                        binary_bits.extend(bits)
+                return np.array(binary_bits, dtype=np.uint8)
+            except:
+                return np.array([], dtype=np.uint8)
+        
+        for hex_key, value in simple_table.items():
+            binary_key = hex_to_binary(hex_key)
+            if len(binary_key) > 0:
+                binary_db[hex_key] = {
+                    'value': value,
+                    'binary_key': binary_key,
+                    'table_type': table_type
+                }
+        
+        return binary_db
+    
+    def _convert_result_color_table_to_binary(self, color_table, table_type):
+        """Convert RGB color key->value table to binary database"""
+        import numpy as np
+        
+        binary_db = {}
+        
+        for color_key, value in color_table.items():
+            try:
+                # Convert color key (integer) to binary representation
+                color_int = int(color_key)
+                # Extract RGB components 
+                r = (color_int >> 16) & 0xFF
+                g = (color_int >> 8) & 0xFF
+                b = color_int & 0xFF
+                
+                # Create binary representation of RGB
+                binary_key = np.array([r, g, b], dtype=np.uint8)
+                
+                binary_db[str(color_key)] = {
+                    'value': value,
+                    'binary_key': binary_key,
+                    'rgb': (r, g, b),
+                    'table_type': table_type
+                }
+            except (ValueError, TypeError):
+                continue
+        
+        return binary_db
+    
+    def _build_details_fuzzy_database(self):
+        """Build binary database for Details (options) fuzzy recognition"""
+        try:
+            # Check if details is loaded
+            if not hasattr(self, 'details') or not self.details:
+                logger.warning('Details not loaded, skipping Details fuzzy database build')
+                return
+            
+            details_total = 0
+            
+            # Initialize details_binary structure
+            if not hasattr(self, 'details_binary'):
+                self.details_binary = {}
+            
+            # Build fuzzy database for options recognition
+            if 'option' in self.details:
+                option_binary = {}
+                
+                # Convert option keys to binary
+                for hex_key, value in self.details['option'].items():
+                    # Skip non-hex keys like 'lengths', 'width', etc.
+                    if hex_key in ['lengths', 'width']:
+                        continue
+                        
+                    try:
+                        # Convert hex key to binary
+                        binary_key = self._hex_to_binary_array(hex_key)
+                        if len(binary_key) > 0:
+                            option_binary[hex_key] = {
+                                'value': value,
+                                'binary_key': binary_key,
+                                'type': 'option'
+                            }
+                            details_total += 1
+                    except (ValueError, TypeError):
+                        continue
+                
+                self.details_binary['option'] = option_binary
+                logger.info(f'Details option fuzzy binary database built: {len(option_binary)} entries')
+            
+            logger.info(f'Total Details fuzzy binary database entries built: {details_total}')
+            
+        except Exception as e:
+            logger.error(f'Failed to build Details fuzzy database: {e}')
+    
+    def _hex_to_binary_array(self, hex_string):
+        """Convert hex string to binary numpy array"""
+        import numpy as np
+        
+        try:
+            binary_bits = []
+            for hex_char in hex_string:
+                if hex_char in '0123456789abcdef':
+                    decimal_val = int(hex_char, 16)
+                    bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                    binary_bits.extend(bits)
+            return np.array(binary_bits, dtype=np.uint8)
+        except:
+            return np.array([], dtype=np.uint8)
     
     def load_resource_notesradar(self):
         resourcename = f'notesradar{define.notesradar_version}'

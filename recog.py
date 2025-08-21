@@ -19,6 +19,15 @@ class Recognition():
                 if np.all((resource.play_side==0)|(trimmed==resource.play_side)):
                     return target
 
+            # === FUZZY RECOGNITION FOR RESULT PLAY_SIDE (new addition) ===
+            if resource.fuzzy_search_enabled:
+                result = Recognition.Result._try_play_side_fuzzy_recognition(np_value)
+                if result:
+                    return result
+                
+                # Save failed recognition for debugging
+                Recognition.Result._save_failed_play_side_recognition(np_value)
+
             return None
 
         @staticmethod
@@ -27,6 +36,12 @@ class Recognition():
             if np.all((resource.dead==0)|(trimmed==resource.dead)):
                 return True
             else:
+                # === FUZZY RECOGNITION FOR RESULT HAS_DEAD (new addition) ===
+                if resource.fuzzy_search_enabled:
+                    result = Recognition.Result._try_has_dead_fuzzy_recognition(np_value, play_side)
+                    if result is not None:
+                        return result
+                
                 return False
         
         @staticmethod
@@ -35,6 +50,12 @@ class Recognition():
             if np.all((resource.rival==0)|(trimmed==resource.rival)):
                 return True
             else:
+                # === FUZZY RECOGNITION FOR RESULT HAS_RIVAL (new addition) ===
+                if resource.fuzzy_search_enabled:
+                    result = Recognition.Result._try_has_rival_fuzzy_recognition(np_value)
+                    if result is not None:
+                        return result
+                
                 return False
         
         @staticmethod
@@ -47,6 +68,15 @@ class Recognition():
             hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
             tablekey = ''.join([format(v, '0x') for v in hexs])
             if not tablekey in resource.informations['play_mode']['table'].keys():
+                # === FUZZY RECOGNITION FOR RESULT PLAY_MODE (new addition) ===
+                if resource.fuzzy_search_enabled:
+                    result = Recognition.Result._try_play_mode_fuzzy_recognition(np_value_informations)
+                    if result:
+                        return result
+                    
+                    # Save failed recognition for debugging
+                    Recognition.Result._save_failed_play_mode_recognition(np_value_informations)
+                
                 return None
             return resource.informations['play_mode']['table'][tablekey]
 
@@ -76,6 +106,17 @@ class Recognition():
             level = resource.informations['difficulty']['table']['level'][difficulty][levelkey]
 
             return difficulty, level
+            
+            # === FUZZY RECOGNITION FOR RESULT DIFFICULTY (new addition) ===
+            if resource.fuzzy_search_enabled:
+                result = Recognition.Result._try_difficulty_fuzzy_recognition(np_value_informations)
+                if result:
+                    return result
+                
+                # Save failed recognition for debugging
+                Recognition.Result._save_failed_difficulty_recognition(np_value_informations)
+            
+            return None, None
 
         @staticmethod
         def get_notes(np_value_informations):
@@ -93,7 +134,17 @@ class Recognition():
                 hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
                 tablekey = ''.join([format(v, '0x') for v in hexs])
                 if not tablekey in resource.informations['notes']['table'].keys():
+                    # === FUZZY RECOGNITION FOR RESULT NOTES (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        digit_result = Recognition.Result._try_notes_digit_fuzzy_recognition(trimmed_once, pos)
+                        if digit_result is not None:
+                            value = value * 10 + digit_result
+                            continue
+                    
                     if value != 0:
+                        # Save failed recognition for debugging
+                        if resource.fuzzy_search_enabled:
+                            Recognition.Result._save_failed_notes_recognition(np_value_informations)
                         return None
                     else:
                         continue
@@ -173,6 +224,824 @@ class Recognition():
                 
                 targettable = targettable[tablekey]
             
+            # === FUZZY RECOGNITION FOR RESULT MUSIC (new addition) ===
+            if resource.fuzzy_search_enabled:
+                # Try threshold tolerance strategy first
+                result = Recognition.Result._try_music_threshold_tolerance(np_value_informations, tolerance=10)
+                if result:
+                    return result
+                
+                # Try fuzzy binary matching if threshold tolerance fails
+                result = Recognition.Result._try_music_fuzzy_recognition(np_value_informations)
+                if result:
+                    return result
+                
+                # Save failed recognition for debugging
+                Recognition.Result._save_failed_music_recognition(np_value_informations)
+            
+            return None
+
+        @staticmethod
+        def _try_music_threshold_tolerance(np_value_informations, tolerance=10):
+            '''Threshold tolerance strategy for Result music recognition'''
+            if resource.informations is None:
+                return None
+
+            trimmed = np_value_informations[resource.informations['music']['trim']]
+
+            # Try each color with expanded threshold tolerance
+            colors = ['blue', 'red', 'gray']
+            best_result = None
+            
+            for color in colors:
+                # Get original thresholds and expand them
+                lower = resource.informations['music']['factors'][color]['lower']
+                upper = resource.informations['music']['factors'][color]['upper']
+                
+                # Apply tolerance to thresholds
+                expanded_lower = np.maximum(0, lower - tolerance)
+                expanded_upper = np.minimum(255, upper + tolerance)
+                
+                filtereds = []
+                for i in range(trimmed.shape[2]):
+                    filtereds.append(np.where((expanded_lower[:,:,i]<=trimmed[:,:,i])&(trimmed[:,:,i]<=expanded_upper[:,:,i]), trimmed[:,:,i], 0))
+                
+                if color == 'blue':
+                    masked_color = np.where((filtereds[0]!=0)&(filtereds[1]!=0)&(filtereds[2]!=0), filtereds[2], 0)
+                elif color == 'red':
+                    masked_color = np.where((filtereds[0]!=0)&(filtereds[1]!=0)&(filtereds[2]!=0), trimmed[:,:,0], 0)
+                else:  # gray
+                    masked_color = np.where((filtereds[0]==filtereds[1])&(filtereds[0]==filtereds[2]), filtereds[0], 0)
+
+                # Check if this color has enough pixels
+                if np.count_nonzero(masked_color) == 0:
+                    continue
+                
+                # Try recognition with this color
+                masked = np.where(resource.informations['music']['masks'][color]==1, masked_color, 0)
+                targettable = resource.informations['music']['tables'][color]
+                
+                result = Recognition.Result._try_table_recognition(masked, targettable)
+                if result:
+                    return result
+            
+            return None
+
+        @staticmethod
+        def _try_table_recognition(masked, targettable):
+            '''Helper method to traverse hierarchical table recognition'''
+            for height in range(masked.shape[0]):
+                unique, counts = np.unique(masked[height], return_counts=True)
+                if len(unique) > 1:
+                    index = -np.argmax(np.flip(counts[1:])) - 1
+                    intensity = unique[index]
+                    bins = np.where(masked[height]==intensity, 1, 0)
+                    hexs = bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                    tablekey = f"{height:02d}{''.join([format(v, '0x') for v in hexs])}"
+                else:
+                    tablekey = f'{height:02d}'
+                
+                if not tablekey in targettable.keys():
+                    break
+
+                if type(targettable[tablekey]) == str:
+                    return targettable[tablekey]
+                
+                targettable = targettable[tablekey]
+            
+            return None
+
+        @staticmethod
+        def _try_music_fuzzy_recognition(np_value_informations):
+            '''Fuzzy binary matching for Result music recognition'''
+            if resource.informations is None or 'music_binary' not in resource.informations.get('music', {}):
+                return None
+            
+            import numpy as np
+            
+            trimmed = np_value_informations[resource.informations['music']['trim']]
+            
+            # Try each color's binary database
+            colors = ['blue', 'red', 'gray']
+            for color in colors:
+                binary_db = resource.informations['music']['music_binary'].get(color)
+                if not binary_db:
+                    continue
+                
+                # Extract color-specific features using original logic
+                lower = resource.informations['music']['factors'][color]['lower']
+                upper = resource.informations['music']['factors'][color]['upper']
+                
+                filtereds = []
+                for i in range(trimmed.shape[2]):
+                    filtereds.append(np.where((lower[:,:,i]<=trimmed[:,:,i])&(trimmed[:,:,i]<=upper[:,:,i]), trimmed[:,:,i], 0))
+                
+                if color == 'blue':
+                    masked_color = np.where((filtereds[0]!=0)&(filtereds[1]!=0)&(filtereds[2]!=0), filtereds[2], 0)
+                elif color == 'red':
+                    masked_color = np.where((filtereds[0]!=0)&(filtereds[1]!=0)&(filtereds[2]!=0), trimmed[:,:,0], 0)
+                else:  # gray
+                    masked_color = np.where((filtereds[0]==filtereds[1])&(filtereds[0]==filtereds[2]), filtereds[0], 0)
+
+                if np.count_nonzero(masked_color) == 0:
+                    continue
+                
+                # Convert to binary path for fuzzy matching
+                masked = np.where(resource.informations['music']['masks'][color]==1, masked_color, 0)
+                query_binary_path = Recognition.Result._extract_binary_path_from_masked(masked)
+                
+                if not query_binary_path:
+                    continue
+                
+                # Search in binary database using Hamming distance
+                matches = Recognition.Result._fuzzy_search_result_music(query_binary_path, binary_db)
+                if matches:
+                    return matches[0]['song_name']
+            
+            return None
+
+        @staticmethod
+        def _extract_binary_path_from_masked(masked):
+            '''Extract binary path from masked array for Result music recognition'''
+            import numpy as np
+            
+            binary_path = []
+            for height in range(masked.shape[0]):
+                unique, counts = np.unique(masked[height], return_counts=True)
+                if len(unique) > 1:
+                    index = -np.argmax(np.flip(counts[1:])) - 1
+                    intensity = unique[index]
+                    bins = np.where(masked[height]==intensity, 1, 0)
+                    
+                    # Convert to hex and then extract binary (skip row number)
+                    hexs = bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                    hex_string = ''.join([format(v, '0x') for v in hexs])
+                    
+                    if hex_string:  # Only add if there's hex content
+                        # Convert hex to binary
+                        binary_bits = []
+                        for hex_char in hex_string:
+                            if hex_char in '0123456789abcdef':
+                                decimal_val = int(hex_char, 16)
+                                bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                                binary_bits.extend(bits)
+                        
+                        if binary_bits:
+                            binary_path.append(np.array(binary_bits, dtype=np.uint8))
+            
+            return binary_path
+
+        @staticmethod
+        def _fuzzy_search_result_music(query_path, binary_db):
+            '''Fuzzy search for Result music using Hamming distance'''
+            import numpy as np
+            
+            matches = []
+            max_distance = 50  # Same as MusicSelect fuzzy recognition
+            
+            for db_key, db_entry in binary_db.items():
+                db_path = db_entry['binary_path']
+                
+                # Check path length
+                if len(query_path) != len(db_path):
+                    continue
+                
+                # Calculate Hamming distance
+                total_distance = 0
+                
+                for query_step, db_step in zip(query_path, db_path):
+                    if len(query_step) != len(db_step):
+                        total_distance = float('inf')
+                        break
+                    
+                    step_distance = int(np.sum(query_step != db_step))
+                    total_distance += step_distance
+                    
+                    # Early termination
+                    if total_distance > max_distance:
+                        break
+                else:
+                    # All steps completed within threshold
+                    if total_distance <= max_distance:
+                        matches.append({
+                            'song_name': db_entry['song_name'],
+                            'total_distance': total_distance,
+                            'color': db_entry['color']
+                        })
+            
+            # Sort by distance
+            matches.sort(key=lambda x: x['total_distance'])
+            return matches
+
+        @staticmethod
+        def _save_failed_music_recognition(np_value_informations):
+            '''Save failed music recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                # Create debug directory
+                debug_dir = os.path.join('failed_results', 'music')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                # Generate timestamp filename
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                # Extract music recognition area
+                if resource.informations and 'music' in resource.informations:
+                    trimmed = np_value_informations[resource.informations['music']['trim']]
+                    # Convert numpy array to PIL Image
+                    img = Image.fromarray(trimmed.astype('uint8'))
+                    img.save(filepath)
+                    
+            except Exception as e:
+                # Silently ignore save errors to prevent disrupting main recognition
+                pass
+
+        @staticmethod
+        def _try_difficulty_fuzzy_recognition(np_value_informations):
+            '''Fuzzy recognition for Result difficulty'''
+            if resource.informations is None or 'binary' not in resource.informations.get('difficulty', {}):
+                return None
+                
+            import numpy as np
+            
+            trimmed = np_value_informations[resource.informations['difficulty']['trim']]
+            converted = trimmed[:,:,0]*0x10000+trimmed[:,:,1]*0x100+trimmed[:,:,2]
+
+            # Try difficulty recognition with color tolerance
+            uniques, counts = np.unique(converted, return_counts=True)
+            
+            # Try multiple candidate colors (top 3 most frequent)
+            sorted_indices = np.argsort(counts)[::-1]
+            candidates = uniques[sorted_indices[:3]]
+            
+            difficulty_binary_db = resource.informations['difficulty']['binary'].get('difficulty', {})
+            
+            for candidate_color in candidates:
+                # Try exact match first
+                if str(candidate_color) in resource.informations['difficulty']['table']['difficulty']:
+                    difficulty = resource.informations['difficulty']['table']['difficulty'][str(candidate_color)]
+                    
+                    # Try level recognition
+                    level = Recognition.Result._try_level_recognition_with_tolerance(converted, candidate_color, difficulty)
+                    if level:
+                        return difficulty, level
+                
+                # Try fuzzy color matching
+                result = Recognition.Result._try_fuzzy_color_match(candidate_color, difficulty_binary_db, tolerance=10)
+                if result:
+                    difficulty = result['value']
+                    level = Recognition.Result._try_level_recognition_with_tolerance(converted, candidate_color, difficulty)
+                    if level:
+                        return difficulty, level
+            
+            return None
+        
+        @staticmethod
+        def _try_fuzzy_color_match(target_color, binary_db, tolerance=10):
+            '''Fuzzy match RGB color with tolerance'''
+            import numpy as np
+            
+            # Extract target RGB
+            target_r = (target_color >> 16) & 0xFF
+            target_g = (target_color >> 8) & 0xFF
+            target_b = target_color & 0xFF
+            target_rgb = np.array([target_r, target_g, target_b])
+            
+            best_match = None
+            min_distance = float('inf')
+            
+            for color_key, entry in binary_db.items():
+                stored_rgb = np.array(entry['rgb'])
+                
+                # Calculate color distance
+                color_distance = np.sum(np.abs(target_rgb - stored_rgb))
+                
+                if color_distance <= tolerance * 3:  # tolerance per channel
+                    if color_distance < min_distance:
+                        min_distance = color_distance
+                        best_match = entry
+            
+            return best_match
+        
+        @staticmethod
+        def _try_level_recognition_with_tolerance(converted, difficulty_color, difficulty_name):
+            '''Try level recognition with tolerance'''
+            import numpy as np
+            
+            leveltrimmed = converted[resource.informations['difficulty']['trimlevel']].flatten()
+            
+            # Try exact match first
+            bins = np.where(leveltrimmed==difficulty_color, 1, 0)
+            hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+            levelkey = ''.join([format(v, '0x') for v in hexs])
+            
+            level_table = resource.informations['difficulty']['table']['level'].get(difficulty_name, {})
+            if levelkey in level_table:
+                return level_table[levelkey]
+            
+            # Try with tolerance (allow slight color variations)
+            for tolerance in [1, 2, 5, 10]:
+                for offset in range(-tolerance, tolerance + 1):
+                    test_color = difficulty_color + offset
+                    bins = np.where(leveltrimmed==test_color, 1, 0)
+                    hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                    test_levelkey = ''.join([format(v, '0x') for v in hexs])
+                    
+                    if test_levelkey in level_table:
+                        return level_table[test_levelkey]
+            
+            # Try fuzzy binary matching if available
+            if 'binary' in resource.informations['difficulty'] and 'level' in resource.informations['difficulty']['binary']:
+                level_binary_db = resource.informations['difficulty']['binary']['level'].get(difficulty_name, {})
+                if level_binary_db:
+                    # Convert levelkey to binary and search
+                    return Recognition.Result._try_fuzzy_binary_match(levelkey, level_binary_db)
+            
+            return None
+        
+        @staticmethod
+        def _try_fuzzy_binary_match(hex_key, binary_db, max_distance=20):
+            '''Fuzzy binary match for simple hex keys'''
+            import numpy as np
+            
+            # Convert query hex to binary
+            query_binary = []
+            for hex_char in hex_key:
+                if hex_char in '0123456789abcdef':
+                    decimal_val = int(hex_char, 16)
+                    bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
+                    query_binary.extend(bits)
+            
+            if not query_binary:
+                return None
+                
+            query_array = np.array(query_binary, dtype=np.uint8)
+            
+            best_match = None
+            min_distance = float('inf')
+            
+            for db_key, entry in binary_db.items():
+                db_binary = entry['binary_key']
+                
+                if len(query_array) == len(db_binary):
+                    distance = int(np.sum(query_array != db_binary))
+                    if distance <= max_distance and distance < min_distance:
+                        min_distance = distance
+                        best_match = entry
+            
+            return best_match['value'] if best_match else None
+        
+        @staticmethod
+        def _save_failed_difficulty_recognition(np_value_informations):
+            '''Save failed difficulty recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                debug_dir = os.path.join('failed_results', 'difficulty')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                if resource.informations and 'difficulty' in resource.informations:
+                    trimmed = np_value_informations[resource.informations['difficulty']['trim']]
+                    img = Image.fromarray(trimmed.astype('uint8'))
+                    img.save(filepath)
+                    
+            except Exception as e:
+                pass
+
+        @staticmethod
+        def _try_play_mode_fuzzy_recognition(np_value_informations):
+            '''Fuzzy recognition for Result play_mode'''
+            if resource.informations is None:
+                return None
+                
+            import numpy as np
+            
+            trimmed = np_value_informations[resource.informations['play_mode']['trim']].flatten()
+            maskvalue = resource.informations['play_mode']['maskvalue']
+            
+            # Try with tolerance for mask value matching
+            for tolerance in [1, 2, 5, 10, 15]:
+                bins = np.where(np.abs(trimmed - maskvalue) <= tolerance, 1, 0)
+                hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                tablekey = ''.join([format(v, '0x') for v in hexs])
+                
+                if tablekey in resource.informations['play_mode']['table']:
+                    return resource.informations['play_mode']['table'][tablekey]
+            
+            # Try fuzzy binary matching if available
+            if 'binary' in resource.informations.get('play_mode', {}):
+                binary_db = resource.informations['play_mode']['binary']
+                
+                # Use original exact binary pattern
+                bins = np.where(trimmed==maskvalue, 1, 0)
+                hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                original_tablekey = ''.join([format(v, '0x') for v in hexs])
+                
+                result = Recognition.Result._try_fuzzy_binary_match(original_tablekey, binary_db, max_distance=30)
+                if result:
+                    return result
+            
+            return None
+        
+        @staticmethod
+        def _save_failed_play_mode_recognition(np_value_informations):
+            '''Save failed play_mode recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                debug_dir = os.path.join('failed_results', 'play_mode')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                if resource.informations and 'play_mode' in resource.informations:
+                    trimmed = np_value_informations[resource.informations['play_mode']['trim']]
+                    img = Image.fromarray(trimmed.astype('uint8'))
+                    img.save(filepath)
+                    
+            except Exception as e:
+                pass
+
+        @staticmethod
+        def _try_notes_digit_fuzzy_recognition(trimmed_once, digit_pos):
+            '''Fuzzy recognition for a single notes digit'''
+            if resource.informations is None:
+                return None
+                
+            import numpy as np
+            
+            maskvalue = resource.informations['notes']['maskvalue']
+            
+            # Try with tolerance for mask value matching
+            for tolerance in [1, 2, 5, 10, 15]:
+                bins = np.where(np.abs(trimmed_once - maskvalue) <= tolerance, 1, 0).flatten()
+                hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                tablekey = ''.join([format(v, '0x') for v in hexs])
+                
+                if tablekey in resource.informations['notes']['table']:
+                    return resource.informations['notes']['table'][tablekey]
+            
+            # Try fuzzy binary matching if available
+            if 'binary' in resource.informations.get('notes', {}):
+                binary_db = resource.informations['notes']['binary']
+                
+                # Use original exact binary pattern
+                bins = np.where(trimmed_once==maskvalue, 1, 0).flatten()
+                hexs=bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                original_tablekey = ''.join([format(v, '0x') for v in hexs])
+                
+                result = Recognition.Result._try_fuzzy_binary_match(original_tablekey, binary_db, max_distance=25)
+                if result:
+                    return result
+            
+            return None
+        
+        @staticmethod
+        def _save_failed_notes_recognition(np_value_informations):
+            '''Save failed notes recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                debug_dir = os.path.join('failed_results', 'notes')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                if resource.informations and 'notes' in resource.informations:
+                    trimmed = np_value_informations[resource.informations['notes']['trim']]
+                    img = Image.fromarray(trimmed.astype('uint8'))
+                    img.save(filepath)
+                    
+            except Exception as e:
+                pass
+
+        @staticmethod
+        def _try_play_side_fuzzy_recognition(np_value):
+            '''Fuzzy recognition for Result play_side'''
+            import numpy as np
+            
+            for target in define.value_list['play_sides']:
+                trimmed = np_value[define.areas_np['play_side'][target]]
+                
+                # Try with tolerance for pixel matching
+                for tolerance in [1, 2, 5, 10]:
+                    # Check if pattern matches with tolerance
+                    mask = (resource.play_side == 0)
+                    diff = np.abs(trimmed.astype(np.int16) - resource.play_side.astype(np.int16))
+                    matches_with_tolerance = mask | (diff <= tolerance)
+                    
+                    if np.all(matches_with_tolerance):
+                        return target
+            
+            return None
+        
+        @staticmethod
+        def _try_has_dead_fuzzy_recognition(np_value, play_side):
+            '''Fuzzy recognition for Result has_dead'''
+            import numpy as np
+            
+            trimmed = np_value[define.areas_np['dead'][play_side]]
+            
+            # Try with tolerance for pixel matching
+            for tolerance in [1, 2, 5, 10, 15]:
+                mask = (resource.dead == 0)
+                diff = np.abs(trimmed.astype(np.int16) - resource.dead.astype(np.int16))
+                matches_with_tolerance = mask | (diff <= tolerance)
+                
+                if np.all(matches_with_tolerance):
+                    return True
+            
+            return False
+        
+        @staticmethod
+        def _try_has_rival_fuzzy_recognition(np_value):
+            '''Fuzzy recognition for Result has_rival'''
+            import numpy as np
+            
+            trimmed = np_value[define.areas_np['rival']]
+            
+            # Try with tolerance for pixel matching
+            for tolerance in [1, 2, 5, 10, 15]:
+                mask = (resource.rival == 0)
+                diff = np.abs(trimmed.astype(np.int16) - resource.rival.astype(np.int16))
+                matches_with_tolerance = mask | (diff <= tolerance)
+                
+                if np.all(matches_with_tolerance):
+                    return True
+            
+            return False
+        
+        @staticmethod
+        def _save_failed_play_side_recognition(np_value):
+            '''Save failed play_side recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                debug_dir = os.path.join('failed_results', 'play_side')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                # Save the relevant play_side areas
+                for target in define.value_list['play_sides']:
+                    try:
+                        trimmed = np_value[define.areas_np['play_side'][target]]
+                        target_filename = f'{timestamp}_{target}.png'
+                        target_filepath = os.path.join(debug_dir, target_filename)
+                        img = Image.fromarray(trimmed.astype('uint8'))
+                        img.save(target_filepath)
+                    except:
+                        continue
+                    
+            except Exception as e:
+                pass
+
+        @staticmethod
+        def _try_options_fuzzy_recognition(trimmed, original_tablekey):
+            '''Fuzzy recognition for Result options'''
+            import numpy as np
+            
+            if resource.details is None:
+                return None
+            
+            # First extract the relevant portion for key generation
+            trimmed_for_key = trimmed[:, :resource.details['option']['lengths'][0]*2]
+            
+            # Generate binary key with exact mask value first
+            maskvalue = resource.details['define']['option']['maskvalue']
+            
+            # Try with different mask value tolerances and Hamming distances
+            for mask_tolerance in [0, 5, 10, 15, 20]:
+                # Generate binary pattern based on mask tolerance
+                if mask_tolerance > 0:
+                    bins = np.where(np.abs(trimmed_for_key[:, ::4].astype(np.int16) - maskvalue) <= mask_tolerance, 1, 0).T
+                else:
+                    bins = np.where(trimmed_for_key[:, ::4] == maskvalue, 1, 0).T
+                
+                # Try with progressively larger Hamming distance tolerance
+                for max_bit_errors in [0, 1, 2, 3, 5, 8, 10]:
+                    # For exact match (0 errors), use traditional method
+                    if max_bit_errors == 0:
+                        hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
+                        exact_tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
+                        
+                        for length in resource.details['option']['lengths']:
+                            test_key = exact_tablekey[:length]
+                            if test_key in resource.details['option']:
+                                return resource.details['option'][test_key]
+                    else:
+                        # Use Hamming distance for fuzzy matching
+                        result = Recognition.Result._find_option_with_hamming_distance(
+                            bins.flatten(), 
+                            resource.details['option'], 
+                            resource.details['option']['lengths'],
+                            max_bit_errors
+                        )
+                        if result:
+                            return result
+            
+            # Try fuzzy binary matching for option keys
+            if hasattr(resource, 'details_binary') and 'option' in getattr(resource, 'details_binary', {}):
+                binary_db = resource.details_binary['option']
+                
+                # Try different lengths of the original key
+                for length in resource.details['option']['lengths']:
+                    test_key = original_tablekey[:length]
+                    result = Recognition.Result._try_fuzzy_binary_match(test_key, binary_db, max_distance=20)
+                    if result:
+                        return result
+            
+            return None
+        
+        @staticmethod
+        def _save_failed_options_recognition(np_value):
+            '''Save failed options recognition image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
+            
+            try:
+                debug_dir = os.path.join('failed_results', 'options')
+                os.makedirs(debug_dir, exist_ok=True)
+                
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
+                
+                # Save options area for both playsides if possible
+                if resource.details and 'define' in resource.details and 'option' in resource.details['define']:
+                    try:
+                        playside = define.details_get_playside(np_value)
+                        trimmed = np_value[resource.details['define']['option']['trim'][playside]]
+                        img = Image.fromarray(trimmed.astype('uint8'))
+                        img.save(filepath)
+                    except:
+                        pass
+                    
+            except Exception as e:
+                pass
+
+        @staticmethod
+        def _find_option_with_hamming_distance(query_bins, option_table, lengths, max_distance):
+            '''Find option key using Hamming distance matching'''
+            import numpy as np
+            
+            query_bins = np.array(query_bins)
+            best_match = None
+            best_distance = float('inf')
+            
+            # Convert query binary to hex string for comparison
+            hexs = query_bins[::4]*8+query_bins[1::4]*4+query_bins[2::4]*2+query_bins[3::4]
+            query_hex_full = ''.join([format(int(v), '0x') for v in hexs])
+            
+            # Try each possible length
+            for length in lengths:
+                query_hex = query_hex_full[:length]
+                query_bits_for_length = query_bins[:length*4]  # 4 bits per hex char
+                
+                # Check each option key
+                for option_key, option_value in option_table.items():
+                    # Skip non-hex keys
+                    if option_key in ['lengths', 'width']:
+                        continue
+                    
+                    # Only compare keys of the same length
+                    if len(option_key) != length:
+                        continue
+                    
+                    # Convert option key to binary
+                    option_bits = []
+                    for hex_char in option_key:
+                        if hex_char in '0123456789abcdef':
+                            val = int(hex_char, 16)
+                            bits = [(val >> i) & 1 for i in range(3, -1, -1)]
+                            option_bits.extend(bits)
+                    
+                    if len(option_bits) != len(query_bits_for_length):
+                        continue
+                    
+                    # Calculate Hamming distance
+                    option_bits = np.array(option_bits)
+                    distance = np.sum(query_bits_for_length != option_bits)
+                    
+                    # Check if this is a better match
+                    if distance <= max_distance and distance < best_distance:
+                        best_distance = distance
+                        best_match = option_value
+            
+            return best_match
+
+        @staticmethod
+        def _try_digit_fuzzy_recognition(trimmed_digit, maskvalue, digit_table):
+            '''Fuzzy recognition for individual digits using Hamming distance'''
+            import numpy as np
+            
+            # Try with mask value tolerance first
+            for mask_tolerance in [0, 3, 5, 8, 10, 15]:
+                if mask_tolerance > 0:
+                    bins = np.where(np.abs(trimmed_digit.astype(np.int16) - maskvalue) <= mask_tolerance, 1, 0).T
+                else:
+                    bins = np.where(trimmed_digit == maskvalue, 1, 0).T
+                
+                # Try with different Hamming distances
+                for max_bit_errors in [0, 1, 2, 3, 5]:
+                    if max_bit_errors == 0:
+                        # Exact match
+                        hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
+                        tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
+                        if tablekey in digit_table:
+                            return digit_table[tablekey]
+                    else:
+                        # Hamming distance search
+                        result = Recognition.Result._find_digit_with_hamming_distance(
+                            bins.flatten(), digit_table, max_bit_errors
+                        )
+                        if result is not None:
+                            return result
+            
+            return None
+
+        @staticmethod
+        def _find_digit_with_hamming_distance(query_bins, digit_table, max_distance):
+            '''Find digit using Hamming distance'''
+            import numpy as np
+            
+            query_bins = np.array(query_bins)
+            best_match = None
+            best_distance = float('inf')
+            
+            for table_key, digit_value in digit_table.items():
+                # Convert table key to binary
+                table_bits = []
+                for hex_char in table_key:
+                    if hex_char in '0123456789abcdef':
+                        val = int(hex_char, 16)
+                        bits = [(val >> i) & 1 for i in range(3, -1, -1)]
+                        table_bits.extend(bits)
+                
+                if len(table_bits) != len(query_bins):
+                    continue
+                
+                table_bits = np.array(table_bits)
+                distance = np.sum(query_bins != table_bits)
+                
+                if distance <= max_distance and distance < best_distance:
+                    best_distance = distance
+                    best_match = digit_value
+            
+            return best_match
+
+        @staticmethod
+        def _try_graphtype_fuzzy_recognition(np_value):
+            '''Fuzzy recognition for Result graphtype'''
+            import numpy as np
+            
+            if resource.details is None:
+                return None
+            
+            playside = define.details_get_playside(np_value)
+            
+            # Try with tolerance for pixel matching
+            for key, value in resource.details['graphtype'].items():
+                trimmed = np_value[resource.details['define']['graphtype'][playside][key]]
+                
+                # Try with tolerance
+                for tolerance in [1, 2, 5, 10]:
+                    diff = np.abs(trimmed.astype(np.int16) - value.astype(np.int16))
+                    matches_with_tolerance = diff <= tolerance
+                    
+                    if np.all(matches_with_tolerance):
+                        return key
+            
             return None
 
         @staticmethod
@@ -201,7 +1070,15 @@ class Recognition():
                         break
                 
                 if value is None:
-                    break
+                    # === FUZZY RECOGNITION FOR RESULT OPTIONS (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        fuzzy_value = Recognition.Result._try_options_fuzzy_recognition(trimmed, tablekey)
+                        if fuzzy_value:
+                            value = fuzzy_value
+                        else:
+                            break
+                    else:
+                        break
 
                 arrange_dp_left = False
                 if value in define.value_list['options_arrange']:
@@ -225,6 +1102,10 @@ class Recognition():
                 else:
                     trimmed = trimmed[:, resource.details['define']['option']['width'][value] + resource.details['define']['option']['width']['/']:]
             
+            # Save failed options recognition if nothing was found
+            if resource.fuzzy_search_enabled and arrange is None and flip is None and assist is None and not battle:
+                Recognition.Result._save_failed_options_recognition(np_value)
+            
             return ResultOptions(arrange, flip, assist, battle)
 
         @staticmethod
@@ -237,6 +1118,13 @@ class Recognition():
                 trimmed = np_value[resource.details['define']['graphtype'][playside][key]]
                 if np.all(trimmed==value):
                     return key
+            
+            # === FUZZY RECOGNITION FOR RESULT GRAPHTYPE (new addition) ===
+            if resource.fuzzy_search_enabled:
+                result = Recognition.Result._try_graphtype_fuzzy_recognition(np_value)
+                if result:
+                    return result
+            
             return 'gauge'
 
         @staticmethod
@@ -294,6 +1182,18 @@ class Recognition():
                 hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
                 tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
                 if not tablekey in resource.details['number_best'].keys():
+                    # === FUZZY RECOGNITION FOR SCORE BEST DIGITS (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        fuzzy_digit = Recognition.Result._try_digit_fuzzy_recognition(
+                            trimmed_once, 
+                            resource.details['define']['numberbest']['maskvalue'],
+                            resource.details['number_best']
+                        )
+                        if fuzzy_digit is not None:
+                            if best is None:
+                                best = 0
+                            best += 10 ** dig * fuzzy_digit
+                            continue
                     break
                 if best is None:
                     best = 0
@@ -308,6 +1208,18 @@ class Recognition():
                 hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
                 tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
                 if not tablekey in resource.details['number_current'].keys():
+                    # === FUZZY RECOGNITION FOR SCORE CURRENT DIGITS (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        fuzzy_digit = Recognition.Result._try_digit_fuzzy_recognition(
+                            trimmed_once, 
+                            resource.details['define']['numbercurrent']['maskvalue'],
+                            resource.details['number_current']
+                        )
+                        if fuzzy_digit is not None:
+                            if current is None:
+                                current = 0
+                            current += 10 ** dig * fuzzy_digit
+                            continue
                     break
                 if current is None:
                     current = 0
@@ -335,6 +1247,18 @@ class Recognition():
                 hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
                 tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
                 if not tablekey in resource.details['number_best'].keys():
+                    # === FUZZY RECOGNITION FOR MISS_COUNT BEST DIGITS (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        fuzzy_digit = Recognition.Result._try_digit_fuzzy_recognition(
+                            trimmed_once, 
+                            resource.details['define']['numberbest']['maskvalue'],
+                            resource.details['number_best']
+                        )
+                        if fuzzy_digit is not None:
+                            if best is None:
+                                best = 0
+                            best += 10 ** dig * fuzzy_digit
+                            continue
                     break
                 if best is None:
                     best = 0
@@ -349,6 +1273,18 @@ class Recognition():
                 hexs = bins[:,0::4]*8+bins[:,1::4]*4+bins[:,2::4]*2+bins[:,3::4]
                 tablekey = ''.join([format(v, '0x') for v in hexs.flatten()])
                 if not tablekey in resource.details['number_current'].keys():
+                    # === FUZZY RECOGNITION FOR MISS_COUNT CURRENT DIGITS (new addition) ===
+                    if resource.fuzzy_search_enabled:
+                        fuzzy_digit = Recognition.Result._try_digit_fuzzy_recognition(
+                            trimmed_once, 
+                            resource.details['define']['numbercurrent']['maskvalue'],
+                            resource.details['number_current']
+                        )
+                        if fuzzy_digit is not None:
+                            if current is None:
+                                current = 0
+                            current += 10 ** dig * fuzzy_digit
+                            continue
                     break
                 if current is None:
                     current = 0
