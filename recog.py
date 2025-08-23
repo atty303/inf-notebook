@@ -226,6 +226,9 @@ class Recognition():
             
             # === FUZZY RECOGNITION FOR RESULT MUSIC (new addition) ===
             if resource.fuzzy_search_enabled:
+                # Save input image for debugging when fuzzy recognition is needed
+                Recognition.Result._save_music_input_for_debug(np_value_informations)
+                
                 # Try threshold tolerance strategy first
                 result = Recognition.Result._try_music_threshold_tolerance(np_value_informations, tolerance=10)
                 if result:
@@ -313,21 +316,17 @@ class Recognition():
 
         @staticmethod
         def _try_music_fuzzy_recognition(np_value_informations):
-            '''Fuzzy binary matching for Result music recognition'''
-            if resource.informations is None or 'music_binary' not in resource.informations.get('music', {}):
+            '''Fuzzy matching for Result music recognition using exact-like approach'''
+            if resource.informations is None:
                 return None
             
             import numpy as np
             
             trimmed = np_value_informations[resource.informations['music']['trim']]
             
-            # Try each color's binary database
+            # Try each color - same as exact matching
             colors = ['blue', 'red', 'gray']
             for color in colors:
-                binary_db = resource.informations['music']['music_binary'].get(color)
-                if not binary_db:
-                    continue
-                
                 # Extract color-specific features using original logic
                 lower = resource.informations['music']['factors'][color]['lower']
                 upper = resource.informations['music']['factors'][color]['upper']
@@ -346,92 +345,158 @@ class Recognition():
                 if np.count_nonzero(masked_color) == 0:
                     continue
                 
-                # Convert to binary path for fuzzy matching
+                # Apply mask
                 masked = np.where(resource.informations['music']['masks'][color]==1, masked_color, 0)
-                query_binary_path = Recognition.Result._extract_binary_path_from_masked(masked)
                 
-                if not query_binary_path:
-                    continue
-                
-                # Search in binary database using Hamming distance
-                matches = Recognition.Result._fuzzy_search_result_music(query_binary_path, binary_db)
-                if matches:
-                    return matches[0]['song_name']
+                # Try fuzzy hierarchical table traversal - same as exact but with tolerance
+                targettable = resource.informations['music']['tables'][color]
+                result = Recognition.Result._try_fuzzy_table_traversal(masked, targettable)
+                if result:
+                    return result
             
             return None
 
         @staticmethod
-        def _extract_binary_path_from_masked(masked):
-            '''Extract binary path from masked array for Result music recognition'''
+        def _try_fuzzy_table_traversal(masked, targettable, max_bit_errors=50):
+            '''Fuzzy hierarchical table traversal with multiple path exploration'''
             import numpy as np
+            from heapq import heappush, heappop
             
-            binary_path = []
-            for height in range(masked.shape[0]):
-                unique, counts = np.unique(masked[height], return_counts=True)
-                if len(unique) > 1:
-                    index = -np.argmax(np.flip(counts[1:])) - 1
-                    intensity = unique[index]
-                    bins = np.where(masked[height]==intensity, 1, 0)
+            def calculate_key_distance(tablekey, dbkey):
+                """Calculate distance between tablekey and database key"""
+                # Keys must have the same row number prefix (first 2 chars)
+                if len(tablekey) < 2 or len(dbkey) < 2 or tablekey[:2] != dbkey[:2]:
+                    return float('inf')
+                
+                # Get hex portions
+                hex1 = tablekey[2:] if len(tablekey) > 2 else ''
+                hex2 = dbkey[2:] if len(dbkey) > 2 else ''
+                
+                try:
+                    # Handle case where DB stores "07" for all-zeros
+                    if hex1 and not hex2:
+                        # tablekey has hex, dbkey doesn't (implies all zeros in DB)
+                        bin1 = bin(int(hex1, 16))[2:].zfill(len(hex1) * 4)
+                        bin2 = '0' * len(bin1)  # All zeros
+                    elif hex2 and not hex1:
+                        # dbkey has hex, tablekey doesn't (implies all zeros in query)
+                        bin2 = bin(int(hex2, 16))[2:].zfill(len(hex2) * 4)
+                        bin1 = '0' * len(bin2)  # All zeros
+                    elif hex1 and hex2:
+                        # Both have hex - must be same length
+                        if len(hex1) != len(hex2):
+                            return float('inf')
+                        bin1 = bin(int(hex1, 16))[2:].zfill(len(hex1) * 4)
+                        bin2 = bin(int(hex2, 16))[2:].zfill(len(hex2) * 4)
+                    else:
+                        # Both are just row numbers (e.g., "07" == "07")
+                        return 0
                     
-                    # Convert to hex and then extract binary (skip row number)
-                    hexs = bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
-                    hex_string = ''.join([format(v, '0x') for v in hexs])
+                    return sum(c1 != c2 for c1, c2 in zip(bin1, bin2)) if bin1 else 0
+                except:
+                    return float('inf')
+            
+            def generate_query_keys(masked):
+                """Generate query keys for each row"""
+                query_keys = []
+                for height in range(masked.shape[0]):
+                    unique, counts = np.unique(masked[height], return_counts=True)
+                    if len(unique) > 1:
+                        index = -np.argmax(np.flip(counts[1:])) - 1
+                        intensity = unique[index]
+                        bins = np.where(masked[height]==intensity, 1, 0)
+                        hexs = bins[::4]*8+bins[1::4]*4+bins[2::4]*2+bins[3::4]
+                        tablekey = f"{height:02d}{''.join([format(v, '0x') for v in hexs])}"
+                    else:
+                        tablekey = f'{height:02d}'
+                    query_keys.append(tablekey)
+                return query_keys
+            
+            def explore_paths(query_keys, table, max_total_distance=max_bit_errors):
+                """Explore all possible paths and find the best matching song"""
+                # Priority queue: (total_distance, depth, unique_id, current_table, path_taken)
+                pq = [(0, 0, 0, table, [])]
+                best_result = None
+                best_distance = float('inf')
+                unique_id = 0
+                
+                while pq:
+                    total_distance, depth, _, current_table, path_taken = heappop(pq)
                     
-                    if hex_string:  # Only add if there's hex content
-                        # Convert hex to binary
-                        binary_bits = []
-                        for hex_char in hex_string:
-                            if hex_char in '0123456789abcdef':
-                                decimal_val = int(hex_char, 16)
-                                bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
-                                binary_bits.extend(bits)
+                    # If we've processed all query keys, we should have found a result
+                    if depth >= len(query_keys):
+                        continue
+                    
+                    # Early termination if distance is too high
+                    if total_distance > max_total_distance:
+                        continue
+                    
+                    query_key = query_keys[depth]
+                    
+                    # Try all keys in current table level
+                    for db_key, value in current_table.items():
+                        key_distance = calculate_key_distance(query_key, db_key)
+                        if key_distance == float('inf'):
+                            continue
                         
-                        if binary_bits:
-                            binary_path.append(np.array(binary_bits, dtype=np.uint8))
+                        new_total_distance = total_distance + key_distance
+                        if new_total_distance > max_total_distance:
+                            continue
+                        
+                        new_path = path_taken + [db_key]
+                        
+                        if isinstance(value, str):
+                            # Found a song - check if it's the best so far
+                            if new_total_distance < best_distance:
+                                best_distance = new_total_distance
+                                best_result = value
+                        elif isinstance(value, dict):
+                            # Continue exploring this path
+                            unique_id += 1
+                            heappush(pq, (new_total_distance, depth + 1, unique_id, value, new_path))
+                
+                return best_result, best_distance
             
-            return binary_path
+            # Generate query keys from the masked image
+            query_keys = generate_query_keys(masked)
+            
+            # Explore all paths and find the best match
+            result, distance = explore_paths(query_keys, targettable)
+            
+            return result
+
+        # Note: _extract_binary_path_from_masked and _fuzzy_search_result_music are no longer needed
+        # Result music fuzzy recognition now uses exact-like approach with _try_fuzzy_table_traversal
 
         @staticmethod
-        def _fuzzy_search_result_music(query_path, binary_db):
-            '''Fuzzy search for Result music using Hamming distance'''
+        def _save_music_input_for_debug(np_value_informations):
+            '''Save Result music input image for debugging'''
+            import os
+            from datetime import datetime
+            from PIL import Image
             import numpy as np
             
-            matches = []
-            max_distance = 50  # Same as MusicSelect fuzzy recognition
-            
-            for db_key, db_entry in binary_db.items():
-                db_path = db_entry['binary_path']
+            try:
+                # Create debug directory
+                debug_dir = os.path.join('debug_results', 'music_input')
+                os.makedirs(debug_dir, exist_ok=True)
                 
-                # Check path length
-                if len(query_path) != len(db_path):
-                    continue
+                # Generate timestamp filename
+                now = datetime.now()
+                timestamp = now.strftime('%Y%m%d-%H%M%S-%f')
+                filename = f'input_{timestamp}.png'
+                filepath = os.path.join(debug_dir, filename)
                 
-                # Calculate Hamming distance
-                total_distance = 0
+                # Convert numpy array to PIL Image and save
+                # np_value_informations is BGR format from OpenCV, convert to RGB
+                rgb_image = np_value_informations[:, :, ::-1]  # BGR to RGB
+                img = Image.fromarray(rgb_image.astype('uint8'), 'RGB')
+                img.save(filepath)
                 
-                for query_step, db_step in zip(query_path, db_path):
-                    if len(query_step) != len(db_step):
-                        total_distance = float('inf')
-                        break
-                    
-                    step_distance = int(np.sum(query_step != db_step))
-                    total_distance += step_distance
-                    
-                    # Early termination
-                    if total_distance > max_distance:
-                        break
-                else:
-                    # All steps completed within threshold
-                    if total_distance <= max_distance:
-                        matches.append({
-                            'song_name': db_entry['song_name'],
-                            'total_distance': total_distance,
-                            'color': db_entry['color']
-                        })
-            
-            # Sort by distance
-            matches.sort(key=lambda x: x['total_distance'])
-            return matches
+                print(f"[DEBUG] Saved Result music input image: {filepath}")
+                
+            except Exception as e:
+                print(f"[DEBUG] Failed to save Result music input image: {e}")
 
         @staticmethod
         def _save_failed_music_recognition(np_value_informations):

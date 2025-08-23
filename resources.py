@@ -179,21 +179,8 @@ class Resource():
             
             result_total = 0
             
-            # Build fuzzy database for music recognition (red/blue/gray tables)
-            if 'music' in self.informations and 'tables' in self.informations['music']:
-                music_tables = self.informations['music']['tables']
-                
-                for color in ['red', 'blue', 'gray']:
-                    if color in music_tables:
-                        binary_db = self._convert_result_music_table_to_binary(music_tables[color], color)
-                        
-                        # Store in informations structure
-                        if 'music_binary' not in self.informations['music']:
-                            self.informations['music']['music_binary'] = {}
-                        self.informations['music']['music_binary'][color] = binary_db
-                        
-                        logger.info(f'Result music {color} fuzzy binary database built: {len(binary_db)} entries')
-                        result_total += len(binary_db)
+            # Note: Result music fuzzy recognition now uses exact-like approach with _try_fuzzy_table_traversal
+            # No need for separate binary database for music recognition
             
             # Build fuzzy database for play_mode recognition
             if 'play_mode' in self.informations and 'table' in self.informations['play_mode']:
@@ -234,54 +221,8 @@ class Resource():
         except Exception as e:
             logger.error(f'Failed to build Result fuzzy database: {e}')
     
-    def _convert_result_music_table_to_binary(self, music_table, color):
-        """Convert Result music table (hierarchical with row numbers) to binary database"""
-        import numpy as np
-        
-        binary_db = {}
-        
-        def hex_to_binary(hex_string: str) -> np.ndarray:
-            """Convert hex string to binary numpy array"""
-            try:
-                binary_bits = []
-                for hex_char in hex_string:
-                    if hex_char in '0123456789abcdef':
-                        decimal_val = int(hex_char, 16)
-                        bits = [(decimal_val >> i) & 1 for i in range(3, -1, -1)]
-                        binary_bits.extend(bits)
-                return np.array(binary_bits, dtype=np.uint8)
-            except:
-                return np.array([], dtype=np.uint8)
-        
-        def process_music_table_recursive(table, path=[]):
-            for key, value in table.items():
-                if isinstance(value, str):
-                    # Leaf node - song name
-                    full_path = path + [key]
-                    
-                    # Convert keys to binary (skip row numbers like "00", "01")
-                    binary_path = []
-                    for path_key in full_path:
-                        if len(path_key) > 2:  # Skip row number keys like "00", "01"
-                            hex_part = path_key[2:]  # Remove row number prefix
-                            if hex_part:  # Only process if there's hex content
-                                binary_key = hex_to_binary(hex_part)
-                                binary_path.append(binary_key)
-                    
-                    if binary_path:  # Only store if we have binary data
-                        db_key = '_'.join(full_path)
-                        binary_db[db_key] = {
-                            'song_name': value,
-                            'binary_path': binary_path,
-                            'original_path': full_path,
-                            'color': color
-                        }
-                
-                elif isinstance(value, dict):
-                    process_music_table_recursive(value, path + [key])
-        
-        process_music_table_recursive(music_table)
-        return binary_db
+    # Note: _convert_result_music_table_to_binary is no longer needed
+    # Result music fuzzy recognition now uses exact-like approach with _try_fuzzy_table_traversal
     
     def _convert_result_simple_table_to_binary(self, simple_table, table_type):
         """Convert simple hex key->value table to binary database"""
