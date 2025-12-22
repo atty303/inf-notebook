@@ -1,9 +1,8 @@
-from define import define
+from define import Playmodes,define
 from resources import resource
 
 ranking_count = 50
 
-playmodes = define.value_list['play_modes']
 difficulties = define.value_list['difficulties']
 attributes = define.value_list['notesradar_attributes']
 
@@ -85,7 +84,7 @@ class NotesRadar():
         self.items: dict[str, NotesRadarItem] = {}
         '''プレイモードごとのアイテム'''
 
-        for playmode in playmodes:
+        for playmode in Playmodes.values:
             self.items[playmode] = NotesRadarItem()
     
     def generate(self, summary: dict[str, dict[str, dict[str, dict[str, str | int]]]]):
@@ -105,11 +104,13 @@ class NotesRadar():
                         continue
                     if not difficulty in summary[musicname][playmode].keys():
                         continue
-                    if not 'score' in summary[musicname][playmode][difficulty].keys():
+                    if not 'best' in summary[musicname][playmode][difficulty].keys():
                         continue
-                    if summary[musicname][playmode][difficulty]['score'] is None:
+                    if not 'score' in summary[musicname][playmode][difficulty]['best'].keys():
                         continue
-                    if summary[musicname][playmode][difficulty]['score'] == 0:
+                    if summary[musicname][playmode][difficulty]['best']['score'] is None:
+                        continue
+                    if summary[musicname][playmode][difficulty]['best']['score'] == 0:
                         continue
                     
                     target = resource.notesradar[playmode]['musics'][musicname][difficulty]
@@ -119,7 +120,7 @@ class NotesRadar():
                     if len(ranking) == ranking_count and min(ranking).value > max:
                         break
 
-                    score = summary[musicname][playmode][difficulty]['score']
+                    score = summary[musicname][playmode][difficulty]['best']['score']['value']
                     
                     rate = score * 10000 / (notes * 2) // 1
                     calculated = rate * max / 100 // 1 / 100
@@ -135,16 +136,33 @@ class NotesRadar():
             
             targetitem.calculate_total()
 
-    def insert(self, playmode: str, musicname: str, difficulty: str, score: int, summary: dict[str, dict[str, dict[str, dict[str, str | int]]]]):
+    def insert(self, playmode: str, musicname: str, difficulty: str, summary: dict[str, dict[str, dict[str, dict[str, str | int]]]]):
         if not musicname in resource.notesradar[playmode]['musics'].keys():
             return False
         if not difficulty in resource.notesradar[playmode]['musics'][musicname].keys():
             return False
+        if not 'notes' in resource.notesradar[playmode]['musics'][musicname][difficulty].keys():
+            return False
+
+        notes = resource.notesradar[playmode]['musics'][musicname][difficulty]['notes']
+
+        if not musicname in summary.keys():
+            return
+        if not playmode in summary[musicname].keys():
+            return
+        if not difficulty in summary[musicname][playmode].keys():
+            return
+        if not 'best' in summary[musicname][playmode][difficulty].keys():
+            return
+        if not 'score' in summary[musicname][playmode][difficulty]['best'].keys():
+            return
+        
+        score = summary[musicname][playmode][difficulty]['best']['score']['value']
+
+        if score is None:
+            return
 
         targetitem = self.items[playmode]
-
-        score = summary[musicname][playmode][difficulty]['score']
-        notes = resource.notesradar[playmode]['musics'][musicname][difficulty]['notes']
 
         updated = False
         for attribute, targetattribute in targetitem.attributes.items():

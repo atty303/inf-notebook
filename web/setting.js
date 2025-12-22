@@ -8,6 +8,10 @@ $(function() {
 
   $('button.select_tabpage').on('click', onclick_tab);
 
+  $('#check_filter_overlay').on('change', onchange_check_filteroverlay);
+  $('button.button_browse_file').on('click', onclick_browse_file);
+  $('button.button_browse_directory').on('click', onclick_browse_directory);
+  
   $('button#button_save').on('click', onclick_button_save);
   $('button#button_close').on('click', onclick_button_close);
 
@@ -30,6 +34,14 @@ async function initialize() {
   $('#check_autosave').prop('checked', setting['autosave']);
   $('#check_autosave_filtered').prop('checked', setting['autosave_filtered']);
   $('#check_filter_compact').prop('checked', setting['filter_compact']);
+  $('#check_filter_overlay').prop('checked', setting['filter_overlay']['use']);
+  ['rival', 'loveletter', 'rivalname'].forEach(key => {
+    $(`#text_overlayimage${key}_path`).val(setting['filter_overlay'][key]['imagefilepath']);
+    $(`#text_overlayimage${key}_offsetx`).val(setting['filter_overlay'][key]['offset'][0]);
+    $(`#text_overlayimage${key}_offsety`).val(setting['filter_overlay'][key]['offset'][1]);
+    $(`#text_overlayimage${key}_scalefactor`).val(setting['filter_overlay'][key]['scalefactor']);
+  });
+
   $('#check_savefilemusicname_right').prop('checked', setting['savefilemusicname_right']);
 
   $('#text_hotkey_active_screenshot').val(setting['hotkeys']['active_screenshot']);
@@ -85,6 +97,8 @@ async function initialize() {
     });
   });
 
+  switch_filteroverlayenabled();
+  
   const params = new URLSearchParams(window.location.search);
   if(!params.has('tab')) {
     switch_displaytab('general');
@@ -110,6 +124,16 @@ function switch_displaytab(tabname) {
 }
 
 /**
+ * ライバル欄画像貼り付け設定の有効/無効の切替
+ */
+function switch_filteroverlayenabled(e) {
+  const v = $('#check_filter_overlay').prop('checked');
+
+  $('div.box_filter_overlay input').prop('disabled', !v);
+  $('div.box_filter_overlay button').prop('disabled', !v);
+}
+
+/**
  * タブを選択
  * @param {ce.Event} e イベントハンドラ
  */
@@ -120,6 +144,47 @@ function onclick_tab(e) {
   const splitted = extracted.split('_');
 
   switch_displaytab(splitted[0]);
+}
+
+/**
+ * ライバル欄画像貼り付け設定が変更された
+ * @param {ce.Event} e イベントハンドラ
+ */
+function onchange_check_filteroverlay(e) {
+  switch_filteroverlayenabled();
+}
+
+/**
+ * ファイルを選択する
+ * @param {ce.Event} e イベントハンドラ
+ */
+async function onclick_browse_file(e) {
+  const targetelement = $(e.target).prev();
+  const selected = JSON.parse(await webui.browse_file(
+    targetelement.val().replaceAll('\\', '/'),
+    JSON.stringify([['Image file', '*.png']]),
+  ));
+
+  if(selected == null) return;
+
+  const normalized = selected.replaceAll('/', '\\');
+  targetelement.val(normalized);
+}
+
+/**
+ * フォルダを選択する
+ * @param {ce.Event} e イベントハンドラ
+ */
+async function onclick_browse_directory(e) {
+  const targetelement = $(e.target).prev();
+  const selected = JSON.parse(await webui.browse_directory(
+    targetelement.val().replaceAll('\\', '/'),
+  ));
+
+  if(selected == null) return;
+
+  const normalized = selected.replaceAll('/', '\\');
+  targetelement.val(normalized);
 }
 
 /**
@@ -164,6 +229,33 @@ async function onclick_button_save(e) {
     'autosave': $('#check_autosave').prop('checked'),
     'autosave_filtered': $('#check_autosave_filtered').prop('checked'),
     'filter_compact': $('#check_filter_compact').prop('checked'),
+    'filter_overlay': {
+      'use': $('#check_filter_overlay').prop('checked'),
+      'rival': {
+        'imagefilepath': $('#text_overlayimagerival_path').val(),
+        'offset': [
+          $('#text_overlayimagerival_offsetx').val(),
+          $('#text_overlayimagerival_offsety').val(),
+        ],
+        'scalefactor': $('#text_overlayimagerival_scalefactor').val(),
+      },
+      'loveletter': {
+        'imagefilepath': $('#text_overlayimageloveletter_path').val(),
+        'offset': [
+          $('#text_overlayimageloveletter_offsetx').val(),
+          $('#text_overlayimageloveletter_offsety').val(),
+        ],
+        'scalefactor': $('#text_overlayimageloveletter_scalefactor').val(),
+      },
+      'rivalname': {
+        'imagefilepath': $('#text_overlayimagerivalname_path').val(),
+        'offset': [
+          $('#text_overlayimagerivalname_offsetx').val(),
+          $('#text_overlayimagerivalname_offsety').val(),
+        ],
+        'scalefactor': $('#text_overlayimagerivalname_scalefactor').val(),
+      },
+    },
     'savefilemusicname_right': $('#check_savefilemusicname_right').prop('checked'),
     'hotkeys': {
       'active_screenshot': $('#text_hotkey_active_screenshot').val(),

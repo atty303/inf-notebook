@@ -12,11 +12,8 @@ span.version {
     padding: 0px;
 }
 
-span#detect_infinitas {
-    user-select: none;
-}
-
-div#capturable {
+span#detect_infinitas,
+span#capturable {
     user-select: none;
 }
 
@@ -60,6 +57,7 @@ table#table_recents td:nth-child(3) {
 
 table#table_recents th:nth-child(5),
 table#table_recents td:nth-child(5) {
+    text-align: center;
     width: 25px;
 }
 
@@ -150,6 +148,21 @@ div.best_timestamps {
 
 .playresult_options {
     font-size: x-small;
+}
+
+div#moredetailbox {
+    display: none;
+    position: absolute;
+    top: 40px;
+    left: 220px;
+    border-style: solid;
+    border-width: 1px;
+    border-color: rgb(96, 96, 96);
+
+    div {
+        display: block;
+        padding: 0px 5px;
+    }
 }
 
 button#button_recents_confirm_uploadcollectionimages {
@@ -248,6 +261,6 @@ iframe#inner_export {
 }
 
 iframe#inner_discordwebhook {
-    width: 600px;
+    width: 680px;
     height: 450px;
 }

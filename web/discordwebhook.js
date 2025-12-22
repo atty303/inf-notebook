@@ -5,10 +5,13 @@ $(function() {
   });
 
   $('button.dialogclose').on('click', onclick_dialogclose);
+  $('button#button_playernameinputok').on('click', onclick_playernameinputok);
   $('button#button_save').on('click', onclick_save);
+  $('button#button_opensitepublic').on('click', onclick_opensitepublic);
   $('button#button_joinevent').on('click', onclick_joinevent);
   $('button#button_joineventinputid').on('click', onclick_joineventinputid);
   $('button#button_eventidinputok').on('click', onclick_eventidinputok);
+  $('button#button_opensitejoined').on('click', onclick_opensitejoined);
   $('button#button_leaveevent').on('click', onclick_leaveevent);
   $('button#button_close').on('click', onclick_close);
 });
@@ -23,7 +26,11 @@ async function initialize() {
 
   const setting = JSON.parse(await webui.get_setting());
   $('input#text_playername').val(setting.discord_webhook.playername);
-  $(`input#radio_filter_${setting.discord_webhook.filter}`).prop('checked', true);
+
+  if(['', 'NO NAME'].includes(setting.discord_webhook.playername)) {
+    $('input#text_dialogplayername').val(setting.discord_webhook.playername);
+    $('dialog#dialog_playernameinput')[0].showModal();
+  }
 
   await get_joineds();
   await get_publics();
@@ -33,12 +40,26 @@ async function get_publics() {
   $('tr.publicitem').off('click', onclick_publicitem);
   $('tr.publicitem').remove();
 
-  const publics = JSON.parse(await webui.discordwebhook_getpublics());
+  $('span#text_geteventsstatus').text('イベントリスト読込中...');
+
+  const eventresult = JSON.parse(await webui.discordwebhook_downloadevents());
+  if(!eventresult) {
+    $('span#text_geteventsstatus').text('読込に失敗しました');
+    return;
+  }
+
+  const publics = JSON.parse(await webui.discordwebhook_getpublishedpublics());
+
+  $('span#text_geteventsstatus')
+    .text('')
+    .removeClass('message');
+  
   Object.keys(publics).forEach(id => {
     const target = publics[id];
 
     const tr = $('<tr>');
     tr.addClass('tableitem publicitem');
+    tr.attr('title', generate_eventtips(target));
 
     const td_id = $('<td>').text(id);
     td_id.addClass('publicitem_cell_id');
@@ -47,6 +68,10 @@ async function get_publics() {
     const td_name = $('<td>').text(target.name);
     td_name.addClass('publicitem_cell_name');
     tr.append(td_name);
+
+    const td_siteurl = $('<td>').text(target.siteurl);
+    td_siteurl.addClass('publicitem_cell_siteurl');
+    tr.append(td_siteurl);
 
     const td_mode = $('<td>');
     if(target.mode == 'battle')
@@ -58,32 +83,18 @@ async function get_publics() {
     td_mode.addClass('publicitem_cell_mode');
     tr.append(td_mode);
 
-    {
-      const localdt = new Date(target.startdatetime);
-      const month = (localdt.getMonth() + 1).toString().padStart(2, '0');
-      const day = localdt.getDate().toString().padStart(2, '0');
-      const hour = localdt.getHours().toString().padStart(2, '0');
-      const minute = localdt.getMinutes().toString().padStart(2, '0');
-      const td = $('<td>').text(`${month}/${day} ${hour}:${minute}`);
-      td.addClass('publicitem_cell_startdatetime');
-      tr.append(td);
-    }
+    const td_startdt = $('<td>').text(convert_datetime(target.startdatetime));
+    td_startdt.addClass('publicitem_cell_startdatetime');
+    tr.append(td_startdt);
 
-    {
-      const localdt = new Date(target.enddatetime);
-      const month = (localdt.getMonth() + 1).toString().padStart(2, '0');
-      const day = localdt.getDate().toString().padStart(2, '0');
-      const hour = localdt.getHours().toString().padStart(2, '0');
-      const minute = localdt.getMinutes().toString().padStart(2, '0');
-      const td = $('<td>').text(`${month}/${day} ${hour}:${minute}`);
-      td.addClass('publicitem_cell_enddatetime');
-      tr.append(td);
-    }
+    const td_enddt = $('<td>').text(convert_datetime(target.enddatetime));
+    td_enddt.addClass('publicitem_cell_enddatetime');
+    tr.append(td_enddt);
 
     const td_targetscore = $('<td>');
     if(target.mode != 'battle') {
       const targetscore = target.targetscore;
-      const text = `${targetscore.musicname}[${targetscore.playmode}${targetscore.difficulty[0]}]`;
+      const text = `[${targetscore.playmode}${targetscore.difficulty[0]}]${targetscore.musicname}`;
       td_targetscore.text(text);
     }
     else {
@@ -107,6 +118,7 @@ async function get_joineds() {
 
     const tr = $('<tr>');
     tr.addClass('tableitem joineditem');
+    tr.attr('title', generate_eventtips(target));
 
     const td_id = $('<td>').text(id);
     td_id.addClass('joineditem_cell_id');
@@ -115,6 +127,10 @@ async function get_joineds() {
     const td_name = $('<td>').text(target.name);
     td_name.addClass('joineditem_cell_name');
     tr.append(td_name);
+
+    const td_siteurl = $('<td>').text(target.siteurl);
+    td_siteurl.addClass('joineditem_cell_siteurl');
+    tr.append(td_siteurl);
 
     const td_mode = $('<td>');
     if(target.mode == 'battle')
@@ -126,32 +142,18 @@ async function get_joineds() {
     td_mode.addClass('joineditem_cell_mode');
     tr.append(td_mode);
 
-    {
-      const localdt = new Date(target.startdatetime);
-      const month = (localdt.getMonth() + 1).toString().padStart(2, '0');
-      const day = localdt.getDate().toString().padStart(2, '0');
-      const hour = localdt.getHours().toString().padStart(2, '0');
-      const minute = localdt.getMinutes().toString().padStart(2, '0');
-      const td = $('<td>').text(`${month}/${day} ${hour}:${minute}`);
-      td.addClass('publicitem_cell_startdatetime');
-      tr.append(td);
-    }
+    const td_startdt = $('<td>').text(convert_datetime(target.startdatetime));
+    td_startdt.addClass('joineditem_cell_startdatetime');
+    tr.append(td_startdt);
 
-    {
-      const localdt = new Date(target.enddatetime);
-      const month = (localdt.getMonth() + 1).toString().padStart(2, '0');
-      const day = localdt.getDate().toString().padStart(2, '0');
-      const hour = localdt.getHours().toString().padStart(2, '0');
-      const minute = localdt.getMinutes().toString().padStart(2, '0');
-      const td = $('<td>').text(`${month}/${day} ${hour}:${minute}`);
-      td.addClass('publicitem_cell_enddatetime');
-      tr.append(td);
-    }
+    const td_enddt = $('<td>').text(convert_datetime(target.enddatetime));
+    td_enddt.addClass('joineditem_cell_enddatetime');
+    tr.append(td_enddt);
 
     const td_targetscore = $('<td>');
     if(target.mode != 'battle') {
       const targetscore = target.targetscore;
-      const text = `${targetscore.musicname}[${targetscore.playmode}${targetscore.difficulty[0]}]`;
+      const text = `[${targetscore.playmode}${targetscore.difficulty[0]}]${targetscore.musicname}`;
       td_targetscore.text(text);
     }
     else {
@@ -167,6 +169,39 @@ async function get_joineds() {
     tr.on('click', onclick_joineditem);
     $('#table_joineds').append(tr);
   });
+}
+
+/**
+ * 
+ * @param {*} eventdata 
+ * @returns tipsの文字列
+ */
+function generate_eventtips(eventdata) {
+  const tips = [
+    `開催者: ${eventdata.authorname}`,
+    `サイトURL: ${eventdata.siteurl}`,
+    '',
+    eventdata.comment,
+  ];
+
+  return tips.join('\n');
+}
+
+/**
+ * ISO 8601式日時文字列から月日時分文字列に変換
+ * 
+ * @param {str} datetime ISO 8601式の文字列
+ * @returns 月日時分の文字列
+ */
+function convert_datetime(datetime) {
+  const localdt = new Date(datetime);
+
+  const month = (localdt.getMonth() + 1).toString().padStart(2, '0');
+  const day = localdt.getDate().toString().padStart(2, '0');
+  const hour = localdt.getHours().toString().padStart(2, '0');
+  const minute = localdt.getMinutes().toString().padStart(2, '0');
+
+  return `${month}/${day} ${hour}:${minute}`;
 }
 
 /**
@@ -191,13 +226,25 @@ async function onclick_dialogclose(e) {
 }
 
 /**
+ * ダイアログのプレイヤー名保存ボタンを押す
+ * @param {ce.Event} e イベントハンドラ
+ */
+async function onclick_playernameinputok(e) {
+  webui.discordwebhook_savesetting(JSON.stringify({
+    playername: $('input#text_dialogplayername').val(),
+  }));
+
+  $('input#text_playername').val($('input#text_dialogplayername').val());
+  $(this).closest('dialog')[0].close();
+}
+
+/**
  * 設定保存ボタンを押す
  * @param {ce.Event} e イベントハンドラ
  */
 async function onclick_save(e) {
   webui.discordwebhook_savesetting(JSON.stringify({
     playername: $('input#text_playername').val(),
-    filter: $('input[name="filter"]:checked').attr('id').match(/[^_]+$/)[0],
   }));
 
   $('dialog#dialog_savecomplete')[0].showModal();
@@ -219,6 +266,19 @@ async function onclick_publicitem(e) {
 async function onclick_joineditem(e) {
   $('tr.joineditem.selected').removeClass('selected');
   $(this).addClass('selected');
+}
+
+/**
+ * 公開中のイベントのサイトを開くボタンを押す
+ * @param {ce.Event} e イベントハンドラ
+ */
+async function onclick_opensitepublic(e) {
+  const target = $('tr.publicitem.selected');
+  if(!target.length) return;
+
+  const url = target.find('td.publicitem_cell_siteurl').text();
+  if(url && url.startsWith('http'))
+    webui.discordwebhook_openurl(url);
 }
 
 /**
@@ -257,6 +317,19 @@ async function onclick_eventidinputok(e) {
     $('dialog#dialog_idnotfound')[0].showModal();
     return;
   }
+}
+
+/**
+ * 参加中のイベントのサイトを開くボタンを押す
+ * @param {ce.Event} e イベントハンドラ
+ */
+async function onclick_opensitejoined(e) {
+  const target = $('tr.joineditem.selected');
+  if(!target.length) return;
+
+  const url = target.find('td.joineditem_cell_siteurl').text();
+  if(url && url.startsWith('http'))
+    webui.discordwebhook_openurl(url);
 }
 
 /**

@@ -1,8 +1,7 @@
 import json
 from os import getcwd
-from datetime import datetime,timezone
 
-from discord_webhook import filtereds
+from define import Playmodes
 
 setting_filepath = 'setting.json'
 
@@ -12,12 +11,30 @@ default = {
     'autosave': False,
     'autosave_filtered': False,
     'filter_compact': False,
+    'filter_overlay': {
+        'use': False,
+        'rival': {
+            'imagefilepath': None,
+            'offset': (0, 0, ),
+            'scalefactor': 1,
+        },
+        'loveletter': {
+            'imagefilepath': None,
+            'offset': (0, 0, ),
+            'scalefactor': 1,
+        },
+        'rivalname': {
+            'imagefilepath': None,
+            'offset': (0, 0, ),
+            'scalefactor': 1,
+        },
+    },
     'savefilemusicname_right': False,
     'hotkeys': {
         'active_screenshot': 'alt+F10',
-        'select_summary': 'alt+M',
-        'select_notesradar': 'alt+N',
-        'select_screenshot': 'alt+S',
+        'select_summary': 'alt+U',
+        'select_notesradar': 'alt+R',
+        'select_screenshot': 'alt+T',
         'select_scoreinformation': 'alt+I',
         'select_scoregraph': 'alt+G',
         'upload_musicselect': 'alt+F8',
@@ -30,14 +47,14 @@ default = {
     'hashtags': '#IIDX #infinitas573 #infnotebook',
     'data_collection': False,
     'summaries' : {
-        'SP': {
+        Playmodes.SP: {
             '8': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '9': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '10': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '11': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '12': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
         },
-        'DP': {
+        Playmodes.DP: {
             '8': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '9': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
             '10': {'cleartypes': ['F-COMBO'], 'djlevels': ['AAA']},
@@ -47,7 +64,6 @@ default = {
     },
     'discord_webhook': {
         'playername': 'NO NAME',
-        'filter': filtereds.NONE,
         'seenevents': [],
         'joinedevents': {},
     },
@@ -99,8 +115,6 @@ class Setting():
             del self.json['discord_webhook']['servers']
         if not 'playername' in self.json['discord_webhook'].keys():
             self.json['discord_webhook']['playername'] = default['discord_webhook']['playername']
-        if not 'filter' in self.json['discord_webhook'].keys():
-            self.json['discord_webhook']['filter'] = default['discord_webhook']['filter']
         if not 'seenevents' in self.json['discord_webhook'].keys():
             self.json['discord_webhook']['seenevents'] = []
         if not 'joinedevents' in self.json['discord_webhook'].keys():
@@ -115,6 +129,19 @@ class Setting():
             self.json['hotkeys']['select_scoreinformation'] = default['hotkeys']['select_scoreinformation']
         if not 'select_scoregraph' in self.json['hotkeys'].keys():
             self.json['hotkeys']['select_scoregraph'] = default['hotkeys']['select_scoregraph']
+        if not 'filter_overlay' in self.json.keys():
+            self.json['filter_overlay'] = default['filter_overlay']
+        if not 'use' in self.json['filter_overlay'].keys():
+            self.json['filter_overlay']['use'] = default['filter_overlay']['use']
+        for key in ['rival', 'loveletter', 'rivalname']:
+            if not key in self.json['filter_overlay'].keys():
+                self.json['filter_overlay'][key] = default['filter_overlay'][key]
+            if not 'imagefilepath' in self.json['filter_overlay'][key].keys():
+                self.json['filter_overlay'][key]['imagefilepath'] = default['filter_overlay'][key]['imagefilepath']
+            if not 'offset' in self.json['filter_overlay'][key].keys():
+                self.json['filter_overlay'][key]['offset'] = default['filter_overlay'][key]['offset']
+            if not 'scalefactor' in self.json['filter_overlay'][key].keys():
+                self.json['filter_overlay'][key]['scalefactor'] = default['filter_overlay'][key]['scalefactor']
 
         self.save()
 
@@ -186,6 +213,16 @@ class Setting():
     @filter_compact.setter
     def filter_compact(self, value: bool):
         self.set_value('filter_compact', value)
+    
+    @property
+    def filter_overlay(self):
+        '''ライバル隠しに重ねる画像の設定
+        '''
+        return self.get_value('filter_overlay')
+
+    @filter_overlay.setter
+    def filter_overlay(self, value: dict[str, any]):
+        self.set_value('filter_overlay', value)
     
     @property
     def savefilemusicname_right(self):

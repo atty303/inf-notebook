@@ -17,12 +17,16 @@ class DrawerScoreinformation {
     'LEGGENDARIA': 'rgb(192, 0, 192)',
   };
 
+  static shadowcolor_fcomboandaaa = 'rgb(240, 200, 80)';
+  static shadowcolor_max = 'rgb(128, 255, 40)';
+  
   static musicname_x = 20;
   static musicname_y = 10;
 
   static scoretype_y = 100;
-  static playmode_x = 80;
-  static difficulty_x = 180;
+  static playtype_x = 80;
+  static difficulty_x = 190;
+  static difficulty_x_battle = 480;
 
   static playedcount_xpositions = {'label': 40, 'value': 700};
   static playedcount_ypositions = {'label': 180, 'value': 175};
@@ -50,18 +54,15 @@ class DrawerScoreinformation {
   static achievementkeys = {
     'fixed': {
       'label': {'text': 'FIXED', 'x': 220, 'y': 640},
+      'max and fcomboandaaa': {'x': 220, 'y': 680},
       'clear_type': {'x': 240, 'y': 680},
       'dj_level': {'x': 330, 'y': 680},
     },
     'S-RANDOM': {
       'label': {'text': 'S-RANDOM', 'x': 620, 'y': 640},
+      'max and fcomboandaaa': {'x': 620, 'y': 680},
       'clear_type': {'x': 640, 'y': 680},
       'dj_level': {'x': 730, 'y': 680},
-    },
-    'DBM': {
-      'label': {'text': 'DBM', 'x': 1000, 'y': 640},
-      'clear_type': {'x': 1020, 'y': 680},
-      'dj_level': {'x': 1110, 'y': 680},
     },
   };
 
@@ -70,25 +71,25 @@ class DrawerScoreinformation {
     'shadowcolor': DrawerScoreinformation.shadowcolor_basic,
     'fontsize': DrawerScoreinformation.fontsize_musicname,
     'maxwidth': 1200,
-  }
+  };
 
   static drawtextargs_basic = {
     'textcolor': DrawerScoreinformation.textcolor,
     'shadowcolor': DrawerScoreinformation.shadowcolor_basic,
     'fontsize': DrawerScoreinformation.fontsize_basic,
-  }
+  };
 
   static drawtextargs_value = {
     'textcolor': DrawerScoreinformation.textcolor,
     'shadowcolor': DrawerScoreinformation.shadowcolor_basic,
     'fontsize': DrawerScoreinformation.fontsize_value,
-  }
+  };
 
   static drawtextargs_small = {
     'textcolor': DrawerScoreinformation.textcolor,
     'shadowcolor': DrawerScoreinformation.shadowcolor_basic,
     'fontsize': DrawerScoreinformation.fontsize_small,
-  }
+  };
 
   canvas = null;
 
@@ -108,10 +109,14 @@ class DrawerScoreinformation {
 
   /**
    * 画像を描画する
-   * @param {} vaues 譜面記録データ
+   * @param {} values 譜面記録データ
+   * @param {string} playtype プレイの種類
+   * @param {string} musicname 曲名
+   * @param {string} difficulty 譜面難易度
+   * @param {boolean} battle バトルモード
    * @returns {blob} 画像データ
    */
-  async draw(values, playmode, musicname, difficulty) {
+  async draw(values, playtype, musicname, difficulty, battle) {
     const ctx = this.canvas.getContext('2d');
 
     const args_difficulty = {
@@ -139,15 +144,15 @@ class DrawerScoreinformation {
 
     this.drawtext_left(
       ctx,
-      playmode,
-      DrawerScoreinformation.playmode_x,
+      playtype,
+      DrawerScoreinformation.playtype_x,
       DrawerScoreinformation.scoretype_y,
       DrawerScoreinformation.drawtextargs_value,
     );
     this.drawtext_left(
       ctx,
       difficulty,
-      DrawerScoreinformation.difficulty_x,
+      !battle ? DrawerScoreinformation.difficulty_x : DrawerScoreinformation.difficulty_x_battle,
       DrawerScoreinformation.scoretype_y,
       args_difficulty,
     );
@@ -251,10 +256,10 @@ class DrawerScoreinformation {
       );
 
       Object.keys(DrawerScoreinformation.achievementkeys).forEach(key => {
-        if(playmode == 'SP' && key == 'DBM') return;
         if(!values.achievement.hasOwnProperty(key) || values.achievement[key] == null) return;
-        
+
         ctx.font = `${DrawerScoreinformation.fontsize_small}px ${this.fontfamily}`;
+
         this.drawtext_center(
           ctx,
           DrawerScoreinformation.achievementkeys[key].label.text,
@@ -263,10 +268,45 @@ class DrawerScoreinformation {
           DrawerScoreinformation.drawtextargs_small,
         );
 
+        if(values.achievement[key]['MAX']) {
+          const drawtextargs = {
+            'textcolor': DrawerScoreinformation.textcolor,
+            'shadowcolor': DrawerScoreinformation.shadowcolors_difficulty[difficulty],
+            'fontsize': DrawerScoreinformation.fontsize_small,
+          };
+        
+          this.drawtext_center(
+            ctx,
+            'MAX',
+            DrawerScoreinformation.achievementkeys[key]['max and fcomboandaaa'].x,
+            DrawerScoreinformation.achievementkeys[key]['max and fcomboandaaa'].y,
+            drawtextargs,
+          );
+  
+          return;
+        }
+        
+        if(values.achievement[key]['F-COMBO & AAA']) {
+          const drawtextargs = {
+            'textcolor': DrawerScoreinformation.textcolor,
+            'shadowcolor': DrawerScoreinformation.shadowcolors_difficulty[difficulty],
+            'fontsize': DrawerScoreinformation.fontsize_small,
+          };
+        
+          this.drawtext_center(
+            ctx,
+            'F-COMBO & AAA',
+            DrawerScoreinformation.achievementkeys[key]['max and fcomboandaaa'].x,
+            DrawerScoreinformation.achievementkeys[key]['max and fcomboandaaa'].y,
+            drawtextargs,
+          );
+  
+          return;
+        }
+        
         ['clear_type', 'dj_level'].forEach(key2 => {
           if(!values.achievement[key].hasOwnProperty(key2) || values.achievement[key][key2] == null) return;
 
-          ctx.font = `bold ${DrawerScoreinformation.fontsize_small}px ${this.fontfamily}`;
           this.drawtext_right(
             ctx,
             values.achievement[key][key2],

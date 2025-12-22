@@ -6,19 +6,33 @@ $(function() {
     if(e == webui.event.DISCONNECTED) console.log('disconnect.');
   });
 
-  const startdtstring = new Date().toISOString().slice(0, 16);
-  $('input#date_start').val(startdtstring);
+  const defaultstartdt = new Date();
+  defaultstartdt.setMinutes(defaultstartdt.getMinutes() - defaultstartdt.getTimezoneOffset());
+  const startdtstring = defaultstartdt.toISOString().slice(0, 16);
 
   const defaultenddt = new Date();
-  defaultenddt.setHours(defaultenddt.getHours() + 8);
   defaultenddt.setMinutes(defaultenddt.getMinutes() - defaultenddt.getTimezoneOffset());
+  defaultenddt.setHours(defaultenddt.getHours() + 8);
   const enddtstring = defaultenddt.toISOString().slice(0, 16);
+
+  const defaultpublishdt = new Date();
+  defaultpublishdt.setMinutes(defaultpublishdt.getMinutes() - defaultpublishdt.getTimezoneOffset());
+  const publishdtstring = defaultpublishdt.toISOString().slice(0, 16);
+
+  $('input#date_start').attr('min', startdtstring);
+  $('input#date_start').val(startdtstring);
   $('input#date_end').attr('min', enddtstring);
   $('input#date_end').val(enddtstring);
+  $('input#date_publish').attr('max', startdtstring);
+  $('input#date_publish').val(publishdtstring);
 
   $('button.dialogclose').on('click', onclick_dialogclose);
 
   $('input[name="mode"]').on('change', onchange_mode);
+
+  $('input#date_start').on('change', onchange_datestart);
+
+  $('input#check_private').on('change', onchange_private);
 
   $('select#select_versions').on('change', onchange_version);
   $('input#text_musicname_search').on('input', oninput_musicname);
@@ -36,6 +50,9 @@ $(function() {
  */
 async function initialize() {
   document.body.addEventListener('contextmenu', e => e.stopPropagation(), true);
+
+  const setting = JSON.parse(await webui.get_setting());
+  $('input#text_authorname').val(setting.discord_webhook.playername);
 
   const musictable = JSON.parse(await webui.getresource_musictable());
 
@@ -65,8 +82,6 @@ async function initialize() {
         .text(difficulty)
       );
   }
-
-  $('input#text_settingname').val(generate_randomsettingname());
 }
 
 /**
@@ -88,6 +103,7 @@ function onchange_mode(e) {
   if(mode == "battle") {
     $('input#check_private').prop('checked', true);
     $('input#check_private').prop('disabled', true);
+    $('input#date_publish').prop('disabled', true);
     $('select#select_versions').addClass('unusable');
     $('input#text_musicname_search').addClass('unusable');
     $('table#table_musicnames').addClass('unusable');
@@ -96,12 +112,41 @@ function onchange_mode(e) {
   }
   else {
     $('input#check_private').prop('disabled', false);
+    $('input#date_publish').prop('disabled', $('input#check_private').is(':checked'));
     $('select#select_versions').removeClass('unusable');
     $('input#text_musicname_search').removeClass('unusable');
     $('table#table_musicnames').removeClass('unusable');
     $('select#select_playmodes').removeClass('unusable');
     $('select#select_difficulties').removeClass('unusable');
   }
+}
+
+/**
+ * 期間開始を変更する
+ * @param {ce.Event} e イベントハンドラ
+ */
+function onchange_datestart(e) {
+  const startdt = new Date($('input#date_start').val());
+  startdt.setMinutes(startdt.getMinutes() - startdt.getTimezoneOffset());
+
+  const publishdtmax = startdt.toISOString().slice(0, 16);
+
+  startdt.setHours(startdt.getHours() + 8);
+  const enddt = startdt.toISOString().slice(0, 16);
+
+  $('input#date_end').attr('min', enddt);
+  $('input#date_end').val(enddt);
+
+  $('input#date_publish').attr('max', publishdtmax);
+  // $('input#date_publish').val(string);
+}
+
+/**
+ * 非公開設定を変更する
+ * @param {ce.Event} e イベントハンドラ
+ */
+function onchange_private(e) {
+  $('input#date_publish').prop('disabled', $('input#check_private').is(':checked'));
 }
 
 async function set_musicnames() {
@@ -257,19 +302,6 @@ function onclick_close(e) {
 }
 
 /**
- * ランダムな設定名を生成する
- * @param {int} length ランダム文字列の長さ
- * @returns 生成された文字列
- */
-function generate_randomsettingname(length = 8) {
-  const characters = Array.from({length}, () => 
-    String.fromCharCode(65 + Math.floor(Math.random() * 26))
-  );
-
-  return `Event-${characters.join('')}`;
-}
-
-/**
  * 検索タブから選択された譜面の情報を表示する
  */
 function check_selectscore() {
@@ -292,28 +324,54 @@ function check_selectscore() {
  * @returns 
  */
 function get_input() {
-  const settingname = $('input#text_settingname').val();
+  const checkinput = function(label, text, maxwidth, allowblank) {
+    if(text.length == 0) {
+      if(allowblank)
+        return true;
 
-  if(settingname.length == 0) {
-    $('span#message').text('名称を入力してください。');
+      $('span#message').text(`${label}を入力してください。`);
+      return false;
+    }
+  
+    const canvas = new OffscreenCanvas(1000, 1000);
+    const ctx = canvas.getContext('2d');
+    ctx.font = $('table').css('font');
+    const textwidth = ctx.measureText(text).width;
+    if(textwidth > maxwidth) {
+      $('span#message').text(`${label}を短くしてください。`);
+      return false;
+    }
+  
+    return true;
+  }
+
+  const eventname = $('input#text_eventname').val();
+  if(!checkinput('イベント名', eventname, 125, false))
+    return null;
+
+  const authorname = $('input#text_authorname').val();
+  if(!checkinput('開催者名', authorname, 75, false))
+    return null;
+
+  const comment = $('input#text_comment').val();
+  if(!checkinput('コメント', comment, 324, true))
+    return null;
+
+  const siteurl = $('input#text_siteurl').val();
+  if(!checkinput('サイトURL', siteurl, 374, true))
+    return null;
+
+  if(siteurl.length > 0 && !siteurl.startsWith('https://')) {
+    $('span#message').text('サイトURLはセキュアなページURLを入力してください。');
     return null;
   }
 
-  const canvas = new OffscreenCanvas(1000, 1000);
-  const ctx = canvas.getContext('2d');
-  ctx.font = $('table').css('font');
-  const textwidth = ctx.measureText(settingname).width;
-  if(textwidth > 100) {
-    $('span#message').text('名称を短くしてください。');
+  const posturl = $('input#text_posturl').val();
+  if(!checkinput('DiscordウェブフックURL', posturl, 800, false))
     return null;
-  }
 
-  const private = $('input#check_private').is(':checked');
-
-  const url = $('input#text_url').val();
-
-  if(url.length == 0) {
-    $('span#message').text('URLを入力してください。');
+  if(!posturl.startsWith('https://discord.com/api/webhooks/')) {
+    $('span#message').text('DiscordウェブフックURLはDiscordの発行するウェブフックURLを入力してください。');
     return null;
   }
 
@@ -345,6 +403,20 @@ function get_input() {
 
   const enddtstring = enddt.toISOString();
 
+  const private = $('input#check_private').is(':checked');
+
+  var publishdtstring = null;
+  if(!private) {
+    const startdt = new Date($('input#date_start').val());
+    const publishdt = new Date($('input#date_publish').val());
+    if(publishdt > startdt) {
+      $('span#message').text('開始日時より後の公開開始日時は設定できません。');
+      return null;
+    }
+
+    publishdtstring = new Date($('input#date_publish').val()).toISOString();
+  }
+
   let targetscore = null;
   if(mode != 'battle') {
     const musicname = $('tr.musicnameitem.selected .musicname_cell_musicname').first().text();
@@ -372,10 +444,14 @@ function get_input() {
   $('span#message').text('');
 
   return {
-    'name': settingname,
-    'private': private,
-    'url': url,
+    'name': eventname,
+    'authorname': authorname,
+    'comment': comment,
+    'siteurl': siteurl,
+    'posturl': posturl,
     'mode': mode,
+    'private': private,
+    'publishdatetime': publishdtstring,
     'startdatetime': startdtstring,
     'enddatetime': enddtstring,
     'targetscore': targetscore,

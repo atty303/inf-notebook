@@ -4,17 +4,19 @@ from sys import exit
 from os.path import join,isfile
 import numpy as np
 
-from define import define
+from define import Playmodes,define
 from data_collection import collection_basepath
 from resources import load_resource_serialized
 from resources_generate import Report,save_resource_serialized,registries_dirname,report_dirname
-from resources_learning import learning_multivalue
+from resources_learning import learning_multivalue,learning
 
 images_musicselect_basepath = join(collection_basepath, 'musicselect')
 label_filepath = join(collection_basepath, 'label_musicselect.json')
 
 recognition_define_filename = 'define_recognition_musicselect.json'
 recognition_define_filepath = join(registries_dirname, recognition_define_filename)
+
+versions_filepath = join(registries_dirname, 'versions.txt')
 
 report_basedir_musicrecog = join(report_dirname, 'musicrecog')
 
@@ -271,6 +273,52 @@ def learning_levels():
                 report.error(f'Mismatch {key} select {selectdifficulty} {target.label["difficulty"]}')
         else:
             report.error(f'Unrecognized {key} {target.label["difficulty"]}')
+
+    report.report()
+
+def learning_hasscoredata():
+    report = Report('musicselect_hasscoredata')
+
+    define_target = musicselect_define['hasscoredata']
+
+    trim = (
+        slice(define_target['trim'][0][0], define_target['trim'][0][1]),
+        slice(define_target['trim'][1][0], define_target['trim'][1][1]),
+        define_target['trim'][2]
+    )
+
+    learning_targets = {}
+    evaluate_targets = {}
+    for key, target in imagevalues.items():
+        if not 'nohasscoredata' in target.label.keys():
+            continue
+
+        trimmed = target.np_value[trim]
+
+        if not target.label['nohasscoredata']:
+            learning_targets[key] = trimmed
+
+        evaluate_targets[key] = {'value': not target.label['nohasscoredata'], 'trimmed': trimmed}
+    
+    report.append_log(f'source count: {len(learning_targets)}')
+
+    result = learning(learning_targets, report)
+    if result is None:
+        report.report()
+        return
+    
+    for key, target in evaluate_targets.items():
+        is_hasscoredata = target['value']
+        recoged = np.all((result==0)|(target['trimmed']==result))
+        if (recoged and is_hasscoredata) or (not recoged and not is_hasscoredata):
+            report.through()
+        else:
+            report.error(f'Mismatch {is_hasscoredata} {key}')
+
+    resource['hasscoredata'] = {
+        'trim': trim,
+        'mask': result
+    }
 
     report.report()
 
@@ -817,42 +865,15 @@ def learning_version():
 
     define_target = musicselect_define['version']
 
-    versions = [
-        '1st',
-        'substream',
-        '2nd style',
-        '3rd style',
-        '4th style',
-        '5th style',
-        '6th style',
-        '7th style',
-        '8th style',
-        '9th style',
-        '10th style',
-        'IIDX RED',
-        'HAPPY SKY',
-        'DistorteD',
-        'GOLD',
-        'DJ TROOPERS',
-        'EMPRESS',
-        'SIRIUS',
-        'Resort Anthem',
-        'Lincle',
-        'tricoro',
-        'SPADA',
-        'PENDUAL',
-        'copula',
-        'SINOBUZ',
-        'CANNON BALLERS',
-        'Rootage',
-        'HEROIC VERSE',
-        'BISTROVER',
-        'CastHour',
-        'RESIDENT',
-        'EPOLIS',
-        'INFINITAS',
-    ]
-
+    versions = []
+    try:
+        with open(versions_filepath, 'r', encoding='UTF-8') as f:
+            for line in f.read().splitlines():
+                versions.extend(line.strip().split('&'))
+    except Exception:
+        print(f"{versions_filepath}を読み込めませんでした。")
+        return
+    
     tables = []
     for part in define_target:
         tables.append({
@@ -955,7 +976,7 @@ def evaluate():
             if not 'version' in evaluate_musictable[musicname].keys():
                 report.error(f'Not registered version {musicname}')
             
-            for playmode in define.value_list['play_modes']:
+            for playmode in Playmodes.values:
                 if playmode in evaluate_musictable[musicname].keys():
                     for difficulty in define.value_list['difficulties']:
                         resultlevel = None
@@ -1000,6 +1021,7 @@ if __name__ == '__main__':
 
     learning_playmode()
     learning_levels()
+    learning_hasscoredata()
     learning_cleartype()
     learning_djlevel()
     learning_number()

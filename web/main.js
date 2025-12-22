@@ -1,6 +1,8 @@
 
 setting = null;
 
+playmodes = null;
+
 musictable = null;
 notesradar = null;
 
@@ -12,7 +14,7 @@ drawer_notesradar = null;
 drawer_scoregraph = null;
 drawer_scoreinformation = null;
 
-selected_playmode = null;
+selected_playtype = null;
 selected_musicname = null;
 selected_difficulty = null;
 selected_timestamp = null;
@@ -54,6 +56,8 @@ reader_scoregraph.onabort = onabort_filereader;
 
 imageblobs = {};
 imageurls = {};
+
+selecttabname_afterloading = null;
 
 $(function() {
   webui.setEventCallback((e) => {
@@ -100,7 +104,7 @@ $(function() {
 
   $('select#select_versions').on('change', onchange_scoreselect_version);
   $('input#text_musicname_search').on('input', oninput_scoreselect_musicname);
-  $('input[name="musicname_search_playmode"]').on('change', onchange_scoreresult_playmode);
+  $('select#select_playtypes').on('change', onchange_scoreresult_playtype);
   $('select#select_difficulties').on('change', onchange_scoreresult_difficulty);
 
   $('button#button_confirm_deletemusicnotebook').on('click', onclick_confirm_deletemusicnotebook);
@@ -149,9 +153,18 @@ async function initialize() {
 
   const [width, height] = JSON.parse(await webui.get_imagesize());
 
-  const playmodes = JSON.parse(await webui.get_playmodes());
+  playmodes = JSON.parse(await webui.get_playmodes());
+
+  const playtypes = JSON.parse(await webui.get_playtypes());
   const difficulties = JSON.parse(await webui.get_difficulties());
   const attributes = JSON.parse(await webui.get_notesradar_attributes());
+
+  for(const playtype of playtypes) {
+    $('#select_playtypes').append($('<option>')
+      .val(playtype)
+      .text(playtype)
+    );
+  }
 
   for(const difficulty of difficulties) {
     $('#select_difficulties').append($('<option>')
@@ -207,40 +220,61 @@ async function initialize() {
 
   webui.start_capturing();
 
-  const result = JSON.parse(await webui.check_latestversion());
-  if(result) {
-    $('div#findnewestversion_message').text(result);
+  const versionresult = JSON.parse(await webui.check_latestversion());
+  if(versionresult) {
+    $('div#findnewestversion_message').text(versionresult);
     $('dialog#dialog_findnewestversion')[0].showModal();
-
-    return;
   }
 
-  const newpublicwebhooks = JSON.parse(await webui.discordwebhook_getnewpublics());
-  const ids = Object.keys(newpublicwebhooks);
-  if(ids.length) {
-    ids.forEach(id => {
-      const target = newpublicwebhooks[id];
+  const imagesavepathresult = JSON.parse(await webui.check_imagesavepath());
+  if(!imagesavepathresult)
+    display_errormessage(['画像ファイル保存先のパスが見つかりません。']);
 
-      const start_localdt = new Date(target.startdatetime);
-      const start_month = start_localdt.getMonth() + 1;
-      const start_day = start_localdt.getDate();
-      const start_hour = start_localdt.getHours();
-      const start_minute = start_localdt.getMinutes();
-      const formatted_startdt = `${start_month}/${start_day} ${start_hour}:${start_minute}`;
+  const eventmessages = [];
+  const deletedevents = JSON.parse(await webui.discordwebhook_deleteendedjoineds());
+  for(const target in deletedevents)
+    eventmessages.push(`${deletedevents[target].name} が終了しました！`);
 
-      const end_localdt = new Date(target.enddatetime);
-      const end_month = end_localdt.getMonth() + 1;
-      const end_day = end_localdt.getDate();
-      const end_hour = end_localdt.getHours();
-      const end_minute = end_localdt.getMinutes();
-      const formatted_enddt = `${end_month}/${end_day} ${end_hour}:${end_minute}`;
+  const eventresult = JSON.parse(await webui.discordwebhook_downloadevents());
+  if(eventresult) {
+    const newpublicwebhooks = JSON.parse(await webui.discordwebhook_getpublishednewpublics());
+    const ids = Object.keys(newpublicwebhooks);
+    if(ids.length) {
+      ids.forEach(id => {
+        const target = newpublicwebhooks[id];
+  
+        const start_localdt = new Date(target.startdatetime);
+        const start_month = String(start_localdt.getMonth() + 1).padStart(2, '0');
+        const start_day = String(start_localdt.getDate()).padStart(2, '0');
+        const start_hour = String(start_localdt.getHours()).padStart(2, '0');
+        const start_minute = String(start_localdt.getMinutes()).padStart(2, '0');
+        const formatted_startdt = `${start_month}/${start_day} ${start_hour}:${start_minute}`;
+  
+        const end_localdt = new Date(target.enddatetime);
+        const end_month = String(end_localdt.getMonth() + 1).padStart(2, '0');
+        const end_day = String(end_localdt.getDate()).padStart(2, '0');
+        const end_hour = String(end_localdt.getHours()).padStart(2, '0');
+        const end_minute = String(end_localdt.getMinutes()).padStart(2, '0');
+        const formatted_enddt = `${end_month}/${end_day} ${end_hour}:${end_minute}`;
+  
+        eventmessages.push(`新着イベント ${target.name}(${formatted_startdt}～${formatted_enddt})`);
+      });
+    }
+  }
+  else {
+    eventmessages.push('イベント情報のダウンロードに失敗しました。');
+  }
 
-      const li = $('<li>').text(`${target.name} ${formatted_startdt} から ${formatted_enddt} まで`);
-      $('ul#list_newdiscordwebhookevents').append(li);
+  if(eventmessages.length > 0) {
+    eventmessages.forEach(message => {
+      const li = $('<li>').text(message);
+      $('ul#list_discordwebhookeventmessage').append(li);
+
+      $('dialog#dialog_discordwebhookeventsnotify')[0].showModal();
     });
-
-    $('dialog#dialog_newdiscordwebhookevents')[0].showModal();
   }
+
+  reload_discordwebhook_settings();
 }
 
 async function load_setting() {
@@ -254,8 +288,6 @@ async function load_setting() {
     $('#button_recents_confirm_uploadcollectionimages').css('display', 'block');
   else
     $('#button_recents_confirm_uploadcollectionimages').css('display', 'none');
-
-  refresh_discordwebhook_settings(setting['discord_webhook']['joinedevents']);
 }
 
 async function generate_imagenothingimage() {
@@ -380,7 +412,7 @@ function communication_message(message, data = null) {
       discordwebhook_append_logs(data);
       break;
     case 'scoreselect':
-      select_score(data.musicname, data.playmode, data.difficulty);
+      select_score(data.musicname, data.playtype, data.difficulty);
       break;
     case 'error':
       display_errormessage(data);
@@ -399,8 +431,19 @@ function display_loadingimage() {
   reader_information.readAsDataURL(imageblobs['loading']);
 }
 
+/**
+ * ローディングを認識したときの処理を実行する
+ * 
+ * まず現在選択されているメインタブを取得して
+ */
 function detect_loading() {
-    display_loadingimage();
+  const nowtabs = $('div.tabpage_main').filter(function() {
+    return $(this).css('display') === 'flex';
+  });
+  if(nowtabs.length > 0)
+    selecttabname_afterloading = nowtabs.first().attr('id').split('_')[2];
+
+  display_loadingimage();
 }
 
 function escape_loading() {
@@ -409,7 +452,10 @@ function escape_loading() {
   reader_information.abort();
   reader_information.readAsDataURL(imageblobs['infinitasinformation']);
 
-  switch_displaytab('main', setting.startup_image);
+  if(selecttabname_afterloading)
+    switch_displaytab('main', selecttabname_afterloading);
+  else
+    switch_displaytab('main', setting.startup_image);
 }
 
 /**
@@ -523,7 +569,11 @@ async function set_recentnotebook_results(selectnewest) {
     td_displaymusicname.addClass('recentresult_cell_displaymusicname');
     tr.append(td_displaymusicname);
 
-    const td_scoretype = $('<td>').text((typeof value['playmode'] === 'string' && typeof value['difficulty'] === 'string') ? `${value['playmode']}${value['difficulty'][0]}` : '???');
+    const td_scoretype = $('<td>');
+    if((typeof value['playtype'] === 'string' && typeof value['difficulty'] === 'string'))
+      td_scoretype.text(`${!value['playtype'].includes('BATTLE')?value['playtype']:'DB'}${value['difficulty'][0]}`);
+    else
+      td_scoretype.text('???');
     td_scoretype.addClass('recentresult_cell_scoretype');
     tr.append(td_scoretype);
 
@@ -543,9 +593,9 @@ async function set_recentnotebook_results(selectnewest) {
     td_news_misscount.addClass('recentresult_cell_news_misscount');
     tr.append(td_news_misscount);
 
-    const td_playmode = $('<td>').text(value['playmode']);
-    td_playmode.addClass('recentresult_cell_playmode cell_hidden');
-    tr.append(td_playmode);
+    const td_playtype = $('<td>').text(value['playtype']);
+    td_playtype.addClass('recentresult_cell_playtype cell_hidden');
+    tr.append(td_playtype);
 
     const td_musicname = $('<td>').text(value['musicname']);
     td_musicname.addClass('recentresult_cell_musicname cell_hidden');
@@ -591,11 +641,11 @@ function select_newest_recentresult() {
  * 
  * 選曲画面で譜面を認識したときに実行する。
  * @param {string} musicname 曲名
- * @param {string} playmode プレイモード(SP or DP)
+ * @param {string} playtype 譜面の種類(SP or DP or DP BATTLE)
  * @param {string} difficulty 譜面難易度
  */
-function select_score(musicname, playmode, difficulty) {
-  if(!change_selected_score(musicname, playmode, difficulty, false))
+function select_score(musicname, playtype, difficulty) {
+  if(!change_selected_score(musicname, playtype, difficulty, false))
     return;
 
   $('tr.recentresultitem.select_first').removeClass('select_first');
@@ -610,15 +660,15 @@ function select_score(musicname, playmode, difficulty) {
 function display_scoreresult_and_playresult_from_recents() {
   const targetitem = $('tr.recentresultitem.select_first')
 
-  const playmode = targetitem.children('td.recentresult_cell_playmode').text();
+  const playtype = targetitem.children('td.recentresult_cell_playtype').text();
   const musicname = targetitem.children('td.recentresult_cell_musicname').text();
   const difficulty = targetitem.children('td.recentresult_cell_difficulty').text();
 
-  if(playmode.lenth == 0) playmode = null;
+  if(playtype.lenth == 0) playtype = null;
   if(musicname.lenth == 0) musicname = null;
   if(difficulty.lenth == 0) difficulty = null;
 
-  if(change_selected_score(musicname, playmode, difficulty, true))
+  if(change_selected_score(musicname, playtype, difficulty, true))
     display_scoreresult();
 
   const timestamp = targetitem.children('td.recentresult_cell_timestamp').text();
@@ -629,14 +679,12 @@ function display_scoreresult_and_playresult_from_recents() {
  * 検索タブから選択された譜面の記録を表示する
  */
 function display_scoreresult_from_scoresearch() {
-  const selected_playmode_id = $('input[name="musicname_search_playmode"]:checked').attr('id');
-
+  playtype = $('#select_playtypes option:selected').val();
   musicname = $('tr.musictableitem.selected .music_cell_musicname').first().text();
-  playmode = $(`label[for="${selected_playmode_id}"]`).text();
   difficulty = $('#select_difficulties option:selected').val();
 
+  selected_playtype = playtype.length > 0 ? playtype : null;
   selected_musicname = musicname.length > 0 ? musicname : null;
-  selected_playmode = playmode.length > 0 ? playmode : null;
   selected_difficulty = difficulty.length > 0 ? difficulty : null;
 
   display_scoreresult();
@@ -656,11 +704,12 @@ function display_scoreresult_from_notesradar() {
   musicname = $('tr.notesradaritem.selected .notesradar_cell_musicname').first().text();
   difficulty = $('tr.notesradaritem.selected .notesradar_cell_difficulty').first().text();
 
-  selected_musicname = musicname.length > 0 ? musicname : null;
-  selected_playmode = playmode.length > 0 ? playmode : null;
-  selected_difficulty = difficulty.length > 0 ? difficulty : null;
+  if(playmode.lenth == 0) playmode = null;
+  if(musicname.lenth == 0) musicname = null;
+  if(difficulty.lenth == 0) difficulty = null;
 
-  display_scoreresult();
+  if(change_selected_score(musicname, playmode, difficulty, true))
+    display_scoreresult();
 
   selected_timestamp = null;
   
@@ -670,13 +719,13 @@ function display_scoreresult_from_notesradar() {
 /**
  * 対象の譜面を選択状態にする
  * @param {string} musicname 曲名
- * @param {string} playmode プレイモード(SP or DP)
+ * @param {string} playtype プレイの種類(SP or DP or DP BATTLE)
  * @param {string} difficulty 譜面難易度
  * @param {bool} force 必ず選択する
  * @returns {boolean} 変更の有無
  */
-function change_selected_score(musicname, playmode, difficulty, force) {
-  if(!force && musicname == selected_musicname && playmode == selected_playmode && difficulty == selected_difficulty)
+function change_selected_score(musicname, playtype, difficulty, force) {
+  if(!force && musicname == selected_musicname && playtype == selected_playtype && difficulty == selected_difficulty)
     return false;
 
   $('tr.musictableitem.selected').removeClass('selected');
@@ -685,14 +734,12 @@ function change_selected_score(musicname, playmode, difficulty, force) {
   });
   targetmusicitem.addClass('selected');
 
-  const target_playmode_id = $(`label.musicname_search_playmode:contains("${playmode}")`).attr('for');
-  $(`input#${target_playmode_id}`).prop('checked', true);
-
+  $('#select_playtypes').val(playtype);
   $('#select_difficulties').val(difficulty);
 
-  selected_playmode = playmode
-  selected_musicname = musicname
-  selected_difficulty = difficulty
+  selected_playtype = playtype;
+  selected_musicname = musicname;
+  selected_difficulty = difficulty;
 
   return true;
 }
@@ -701,13 +748,11 @@ function change_selected_score(musicname, playmode, difficulty, force) {
  * 選択している譜面の情報を検索タブの状態から取得する
  */
 function get_selected_score() {
-  const selected_playmode_id = $('input[name="musicname_search_playmode"]:checked').attr('id');
-
-  const playmode = $(`label[for="${selected_playmode_id}"]`).text();
+  const playtype = $('#select_playtypes option:selected').val();
   const musicname = $('tr.musictableitem.selected .music_cell_musicname').first().text();
   const difficulty = $('#select_difficulties option:selected').val();
 
-  selected_playmode = playmode.length > 0 ? playmode : null;
+  selected_playtype = playtype.length > 0 ? playtype : null;
   selected_musicname = musicname.length > 0 ? musicname : null;
   selected_difficulty = difficulty.length > 0 ? difficulty : null;
 }
@@ -723,28 +768,35 @@ async function display_scoreresult() {
   $('#score_played_count').text('');
   clear_bests();
 
-  if(selected_musicname == null || selected_playmode == null || selected_difficulty == null) {
+  if(selected_musicname == null || selected_playtype == null || selected_difficulty == null) {
     $('img#image_scoreinformation').attr('src', imageurls['imagenothing']);
     $('img#image_scoregraph').attr('src', imageurls['imagenothing']);
     return;
   }
 
-  const scoreresult = JSON.parse(await webui.get_scoreresult(selected_musicname, selected_playmode, selected_difficulty));
-
-  if(scoreresult == null) {
-    $('img#image_scoreinformation').attr('src', imageurls['imagenothing']);
-    $('img#image_scoregraph').attr('src', imageurls['imagenothing']);
-    return;
-  }
-
-  const scoretype = `${selected_playmode}${selected_difficulty[0]}`;
+  const battle = !playmodes.includes(selected_playtype);
+  let scoretype;
+  if(!battle)
+    scoretype = `${selected_playtype}${selected_difficulty[0]}`;
+  else
+    scoretype = `DB${selected_difficulty[0]}`;
   $('span#selectscore').text(`[${scoretype}]${selected_musicname}`);
+
+  const scoreresult = JSON.parse(await webui.get_scoreresult(selected_musicname, selected_playtype, selected_difficulty));
+  if(scoreresult == null) {
+    $('#score_played_count').text(0);
+
+    $('img#image_scoreinformation').attr('src', imageurls['imagenothing']);
+    $('img#image_scoregraph').attr('src', imageurls['imagenothing']);
+    return;
+  }
 
   const blob_scoreinformation = await drawer_scoreinformation.draw(
     scoreresult,
-    selected_playmode,
+    selected_playtype,
     selected_musicname,
     selected_difficulty,
+    battle,
   );
 
   const url_scoreinformation = URL.createObjectURL(blob_scoreinformation);
@@ -776,55 +828,62 @@ async function display_scoreresult() {
       $('table#table_timestamps').append(tr);
 
       const targetresult = scoreresult['history'][timestamp];
-      
-      const date = timestamp.slice(0, 8);
-      const time = timestamp.slice(9, 15);
+      if(targetresult.playspeed == null) {
+        const date = timestamp.slice(0, 8);
+        const time = timestamp.slice(9, 15);
 
-      const year = date.slice(0, 4);
-      const month = date.slice(4, 6);
-      const day = date.slice(6, 8);
+        const year = date.slice(0, 4);
+        const month = date.slice(4, 6);
+        const day = date.slice(6, 8);
 
-      const hours = time.slice(0, 2);
-      const minutes = time.slice(2, 4);
-      const seconds = time.slice(4, 6);
+        const hours = time.slice(0, 2);
+        const minutes = time.slice(2, 4);
+        const seconds = time.slice(4, 6);
 
-      xvalues.push(new Date(year, month - 1, day, hours, minutes, seconds));
-      scores.push(targetresult['score']['value']);
-      misscounts.push(targetresult.hasOwnProperty('miss_count') ? targetresult['miss_count']['value'] : null);
+        xvalues.push(new Date(year, month - 1, day, hours, minutes, seconds));
+        scores.push(targetresult['score']['value']);
+        misscounts.push(targetresult.hasOwnProperty('miss_count') ? targetresult['miss_count']['value'] : null);
+      }
     });
 
-    const chartdata = [[], []];
-    for(let i = 0; i < xvalues.length; i++) {
-      chartdata[0].push({x: xvalues[i], y: scores[i]});
-      chartdata[1].push({x: xvalues[i], y: misscounts[i]});
+    if(xvalues.length) {
+      const chartdata = [[], []];
+      for(let i = 0; i < xvalues.length; i++) {
+        chartdata[0].push({x: xvalues[i], y: scores[i]});
+        chartdata[1].push({x: xvalues[i], y: misscounts[i]});
+      }
+
+      const xvalue_max = new Date(xvalues[0]);
+      const xvalue_min = xvalues[xvalues.length - 1];
+      xvalue_max.setDate(xvalue_max.getDate() + 1);
+
+      const xrange = [
+        `${xvalue_min.getFullYear()}${String(xvalue_min.getMonth()+1).padStart(2, '0')}${String(xvalue_min.getDate()).padStart(2, '0')}`,
+        `${xvalue_max.getFullYear()}${String(xvalue_max.getMonth()+1).padStart(2, '0')}${String(xvalue_max.getDate()).padStart(2, '0')}`,
+      ];
+
+      const blob_scoregraph = await drawer_scoregraph.draw(
+        chartdata,
+        xrange,
+        scoreresult['notes'],
+        scoretype,
+        selected_musicname,
+      );
+
+      const url_scoregraph = URL.createObjectURL(blob_scoregraph);
+
+      update_imageurl('scoregraph', 'image_scoregraph', url_scoregraph);
+
+      reader_scoregraph.abort();
+      reader_scoregraph.readAsDataURL(blob_scoregraph);
     }
-
-    const xvalue_max = new Date(xvalues[0]);
-    const xvalue_min = xvalues[xvalues.length - 1];
-    xvalue_max.setDate(xvalue_max.getDate() + 1);
-
-    const xrange = [
-      `${xvalue_min.getFullYear()}${String(xvalue_min.getMonth()+1).padStart(2, '0')}${String(xvalue_min.getDate()).padStart(2, '0')}`,
-      `${xvalue_max.getFullYear()}${String(xvalue_max.getMonth()+1).padStart(2, '0')}${String(xvalue_max.getDate()).padStart(2, '0')}`,
-    ];
-
-    const blob_scoregraph = await drawer_scoregraph.draw(
-      chartdata,
-      xrange,
-      scoreresult['notes'],
-      selected_musicname,
-      selected_playmode,
-      selected_difficulty
-    );
-
-    const url_scoregraph = URL.createObjectURL(blob_scoregraph);
-
-    update_imageurl('scoregraph', 'image_scoregraph', url_scoregraph);
-
-    reader_scoregraph.abort();
-    reader_scoregraph.readAsDataURL(blob_scoregraph);
+    else {
+      webui.clear_scoregraphimage();
+      $('img#image_scoregraph').attr('src', imageurls['imagenothing']);
+    }
   }
   else {
+    webui.clear_scoregraphimage();
     $('img#image_scoregraph').attr('src', imageurls['imagenothing']);
   }
 
@@ -851,6 +910,9 @@ function clear_playresult() {
   $('#playresult_score').text('');
   $('#playresult_misscount').text('');
   $('#playresult_options').text('');
+
+  $('div#moredetailbox').css('display', 'none');
+  $('#playresult_playspeed').text('');
 }
 
 /**
@@ -860,7 +922,7 @@ function clear_playresult() {
 async function display_playresult(timestamp) {
   clear_playresult();
   
-  if(selected_musicname == null || selected_playmode == null || selected_difficulty == null)
+  if(selected_musicname == null || selected_playtype == null || selected_difficulty == null)
     return;
 
   if(timestamp.length == 0) return;
@@ -868,16 +930,15 @@ async function display_playresult(timestamp) {
   selected_timestamp = timestamp;
 
   let encodedimage = null;
-  console.log(setting.resultimage_filtered);
   if(!setting.resultimage_filtered)
-    encodedimage = JSON.parse(await webui.get_resultimage(selected_musicname, selected_playmode, selected_difficulty, timestamp));
+    encodedimage = JSON.parse(await webui.get_resultimage(selected_musicname, selected_playtype, selected_difficulty, timestamp));
   else
-    encodedimage = JSON.parse(await webui.get_resultimage_filtered(selected_musicname, selected_playmode, selected_difficulty, timestamp));
+    encodedimage = JSON.parse(await webui.get_resultimage_filtered(selected_musicname, selected_playtype, selected_difficulty, timestamp));
 
   if(encodedimage !== null)
     display_encodedimage(encodedimage, 'image_screenshot');
 
-  const playresult = JSON.parse(await webui.get_playresult(selected_musicname, selected_playmode, selected_difficulty, timestamp));
+  const playresult = JSON.parse(await webui.get_playresult(selected_musicname, selected_playtype, selected_difficulty, timestamp));
 
   if(playresult == null) return;
 
@@ -905,12 +966,16 @@ async function display_playresult(timestamp) {
       playresult.options.arrange != null ? playresult.options.arrange : '',
       playresult.options.flip != null ? playresult.options.flip : '',
       playresult.options.assist != null ? playresult.options.assist : '',
-      (playresult.options.battle != null && playresult.options.battle) ? 'BATTLE' : '',
     ];
     $('#playresult_options').text(options.join(' '));
   }
   else {
     $('#playresult_options').text('不明');
+  }
+
+  if(playresult.playspeed != null) {
+    $('div#moredetailbox').css('display', 'block');
+    $('#playresult_playspeed').text(playresult.playspeed.toFixed(2));
   }
 }
 
@@ -969,9 +1034,9 @@ function onclick_tab(e) {
  * @param {ce.Event} e イベントハンドラ
  */
 async function onclick_save_scoreinformationimage(e) {
-  if(selected_playmode == null || selected_musicname == null || selected_difficulty == null) return;
+  if(selected_playtype == null || selected_musicname == null || selected_difficulty == null) return;
   
-  if(!await webui.save_scoreinformationimage(selected_playmode, selected_musicname, selected_difficulty))
+  if(!await webui.save_scoreinformationimage(selected_playtype, selected_musicname, selected_difficulty))
     display_errormessage(['画像の保存に失敗しました。']);
 }
 
@@ -980,9 +1045,9 @@ async function onclick_save_scoreinformationimage(e) {
  * @param {ce.Event} e イベントハンドラ
  */
 async function onclick_save_scoregraphimage(e) {
-  if(selected_playmode == null || selected_musicname == null || selected_difficulty == null) return;
+  if(selected_playtype == null || selected_musicname == null || selected_difficulty == null) return;
 
-  if(!await webui.save_scoregraphimage(selected_playmode, selected_musicname, selected_difficulty))
+  if(!await webui.save_scoregraphimage(selected_playtype, selected_musicname, selected_difficulty))
     display_errormessage(['画像の保存に失敗しました。']);
 }
 
@@ -1059,7 +1124,7 @@ function onclick_post_notesradar(e) {
  */
 function onclick_post_scoreinformation(e) {
   webui.post_scoreinformation(
-    selected_playmode,
+    selected_playtype,
     selected_musicname,
     selected_difficulty,
   );
@@ -1135,7 +1200,7 @@ async function onclick_recents_save_resultimages_filtered(e) {
 
   await webui.recents_save_resultimages_filtered(JSON.stringify(timestamps));
 
-  const encodedimage = JSON.parse(await webui.get_resultimage_filtered(selected_musicname, selected_playmode, selected_difficulty, selected_timestamp));
+  const encodedimage = JSON.parse(await webui.get_resultimage_filtered(selected_musicname, selected_playtype, selected_difficulty, selected_timestamp));
 
   display_encodedimage(encodedimage, 'image_screenshot');
 }
@@ -1312,7 +1377,7 @@ function onclick_recents_execute_uploadcollectionimages(e) {
     timestamps.push($(this).find('td.recentresult_cell_timestamp').text());
   });
 
-  webui.recents_upload_collectionimages(timestamps);
+  webui.recents_upload_collectionimages(JSON.stringify(timestamps));
 
   $(this).closest('dialog')[0].close();
 }
@@ -1350,7 +1415,7 @@ async function onclick_execute_deletemusicnotebook(e) {
  * @param {ce.Event} e イベントハンドラ
  */
 function onclick_confirm_deletescoreresult(e) {
-  if(selected_playmode == null || selected_musicname == null || selected_difficulty == null) {
+  if(selected_playtype == null || selected_musicname == null || selected_difficulty == null) {
     $('dialog#dialog_message_scoreselect')[0].showModal();
     return;
   }
@@ -1363,7 +1428,7 @@ function onclick_confirm_deletescoreresult(e) {
  * @param {ce.Event} e イベントハンドラ
  */
 async function onclick_execute_deletescoreresult(e) {
-  await webui.delete_scoreresult(selected_playmode, selected_musicname, selected_difficulty);
+  await webui.delete_scoreresult(selected_playtype, selected_musicname, selected_difficulty);
 
   selected_timestamp = null;
   
@@ -1391,7 +1456,7 @@ function onclick_confirm_deleteplayresult(e) {
  * @param {ce.Event} e イベントハンドラ
  */
 async function onclick_execute_deleteplayresult(e) {
-  await webui.delete_playresult(selected_playmode, selected_musicname, selected_difficulty, selected_timestamp);
+  await webui.delete_playresult(selected_playtype, selected_musicname, selected_difficulty, selected_timestamp);
 
   selected_timestamp = null;
 
@@ -1429,10 +1494,10 @@ function onclick_musictableitem(e) {
 }
 
 /**
- * プレイモードを選択する
+ * プレイの種類を選択する
  * @param {ce.Event} e イベントハンドラ
  */
-function onchange_scoreresult_playmode(e) {
+function onchange_scoreresult_playtype(e) {
   display_scoreresult_from_scoresearch();
 }
 
@@ -1621,8 +1686,26 @@ function refresh_discordwebhook_settings(settings) {
   Object.keys(settings).forEach(function(key) {
     const target = settings[key];
 
+    const targetscore = target.targetscore;
+
+    const tips = [];
+    if(target.mode != 'battle') {
+      tips.push(...[
+        `[${targetscore.playmode}${targetscore.difficulty[0]}]${targetscore.musicname}`,
+        '',
+      ]);
+    }
+    
+    tips.push(...[
+      `開催者: ${target.authorname}`,
+      `サイトURL: ${target.siteurl}`,
+      '',
+      target.comment,
+    ]);
+
     const tr = $('<tr>');
     tr.addClass('tableitem discordwebhookitem');
+    tr.attr('title', tips.join('\n'));
 
     const td_name = $('<td>').text(target['name']);
     td_name.addClass('discordwebhook_cell_name');
@@ -1875,7 +1958,7 @@ function onloadend_scoreinformationimage(e) {
 
   webui.upload_scoreinformationimage(
     e.target.result.split(',')[1],
-    selected_playmode,
+    selected_playtype,
     selected_musicname,
     selected_difficulty
   );
@@ -1886,7 +1969,7 @@ function onloadend_scoregraphimage(e) {
 
   webui.upload_scoregraphimage(
     e.target.result.split(',')[1],
-    selected_playmode,
+    selected_playtype,
     selected_musicname,
     selected_difficulty
   );

@@ -2,18 +2,18 @@ from datetime import datetime
 from webbrowser import open
 from urllib.parse import quote
 
-from define import define
+from define import Playmodes,Playtypes
 from resources import resource
 from record import NotebookSummary
 from notesradar import NotesRadar,NotesRadarAttribute
 
 post_url = 'https://twitter.com/intent/tweet'
 
-def score_format(playmode: str, difficulty: str, musicname: str):
+def score_format(playtype: str, difficulty: str, musicname: str):
     return ''.join((
         musicname if musicname is not None else '??????',
         '[',
-        playmode if playmode is not None else '??',
+        (playtype if playtype != Playtypes.DPBATTLE else 'DB') if playtype is not None else '??',
         difficulty[0] if difficulty is not None else '?',
         ']',
     ))
@@ -24,11 +24,11 @@ def timestamp_format(timestamp: str):
 
 def post_summary(notebook: NotebookSummary, hashtags: str):
     counts = {}
-    for playmode in define.value_list['play_modes']:
+    for playmode in Playmodes.values:
         counts[playmode] = {'TOTAL': 0, 'F-COMBO': 0, 'AAA': 0, 'NO DATA': 0}
     
     for musicname, value1 in resource.musictable['musics'].items():
-        for playmode in define.value_list['play_modes']:
+        for playmode in Playmodes.values:
             for difficulty in value1[playmode].keys():
                 counts[playmode]['TOTAL'] += 1
                 if musicname in notebook.json['musics'].keys() and difficulty in notebook.json['musics'][musicname][playmode].keys():
@@ -44,7 +44,6 @@ def post_summary(notebook: NotebookSummary, hashtags: str):
         total = value['TOTAL']
         fullcombo = value['F-COMBO']
         aaa = value['AAA']
-        nodata = value['NO DATA']
         musics_text.append(f'{playmode}(全{total}) F-COMBO: {fullcombo} AAA: {aaa}')
 
     text = quote('\n'.join((*musics_text, hashtags)))
@@ -80,18 +79,21 @@ def post_results(values: list[dict], hashtags: str):
         music = result['music']
         music = music if music is not None else '??????'
 
-        line = [score_format(result['play_mode'], result['difficulty'], music)]
+        line = [score_format(result['playtype'], result['difficulty'], music)]
 
-        if result['update_clear_type'] is not None or result['update_dj_level'] is not None:
-            line.append(' '.join(v for v in [result['update_clear_type'], result['update_dj_level']] if v is not None))
-        else:
-            if result['update_score'] is not None:
-                line.append(f"自己ベスト+{result['update_score']}")
+        if not 'playspeed' in result.keys() or result['playspeed'] is None:
+            if result['update_clear_type'] is not None or result['update_dj_level'] is not None:
+                line.append(' '.join(v for v in [result['update_clear_type'], result['update_dj_level']] if v is not None))
             else:
-                if result['update_miss_count'] is not None:
-                    line.append(f"ミスカウント{result['update_miss_count']}")
+                if result['update_score'] is not None:
+                    line.append(f"自己ベスト+{result['update_score']}")
                 else:
-                    line.append('')
+                    if result['update_miss_count'] is not None:
+                        line.append(f"ミスカウント{result['update_miss_count']}")
+                    else:
+                        line.append('')
+        else:
+            line.append(f"{result['playspeed']:.2f}倍")
 
         if result['option'] is not None:
             if result['option'] == '':
@@ -108,8 +110,8 @@ def post_results(values: list[dict], hashtags: str):
 
     open(url)
 
-def post_scoreinformation(playmode: str, difficulty: str, musicname: str, record: dict, hashtags: str):
-    lines = [score_format(playmode, difficulty, musicname)]
+def post_scoreinformation(playtype: str, difficulty: str, musicname: str, record: dict, hashtags: str):
+    lines = [score_format(playtype, difficulty, musicname)]
 
     if 'timestamps' in record.keys():
         lines.append(f"今までプレイ回数: {len(record['timestamps'])} 回")

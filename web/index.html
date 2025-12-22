@@ -153,10 +153,7 @@
                 </div>
                 <div class="pane_musicname_search_right">
                   <div>
-                    <input type="radio" name="musicname_search_playmode" id="radio_musicname_search_playmode_sp" />
-                    <label class="musicname_search_playmode" for="radio_musicname_search_playmode_sp">SP</label>
-                    <input type="radio" name="musicname_search_playmode" id="radio_musicname_search_playmode_dp" />
-                    <label class="musicname_search_playmode" for="radio_musicname_search_playmode_dp">DP</label>
+                    <select id="select_playtypes"></select>
                   </div>
                   <div>
                     <select id="select_difficulties"></select>
@@ -298,6 +295,10 @@
                 <div class="label highlight label_playresult">オプション</div>
                 <div id="playresult_options" class="playresult_value playresult_datetime"></div>
               </div>
+              <div id="moredetailbox">
+                <div class="label highlight">プレイ速度</div>
+                <div id="playresult_playspeed"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -402,10 +403,10 @@
         </div>
       </div>
     </dialog>
-    <dialog id="dialog_newdiscordwebhookevents">
+    <dialog id="dialog_discordwebhookeventsnotify">
       <div>
-        <div>新着のイベントが見つかりました。</div>
-        <ul id="list_newdiscordwebhookevents"></ul>
+        <div>イベントのお知らせ</div>
+        <ul id="list_discordwebhookeventmessage"></ul>
         <div class="buttons_in_dialog">
           <button class="dialogclose">OK</button>
         </div>

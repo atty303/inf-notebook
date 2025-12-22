@@ -10,7 +10,7 @@ logger_child_name = 'export'
 logger = getLogger().getChild(logger_child_name)
 logger.debug(f'loaded export.py')
 
-from define import define
+from define import Playmodes,Playtypes,define
 from resources import resource
 from record import NotebookSummary
 from notesradar import NotesRadar
@@ -31,8 +31,8 @@ notesradar_image_filepath = join(export_dirname, 'notesradar.png')
 
 notesradar_csv_filepath = join(export_dirname, 'notesradar.csv')
 notesradar_csv_rankings_filepaths = {
-    'SP': join(export_dirname, 'notesradar_rankings_sp.csv'),
-    'DP': join(export_dirname, 'notesradar_rankings_dp.csv')
+    Playmodes.SP: join(export_dirname, 'notesradar_rankings_sp.csv'),
+    Playmodes.DP: join(export_dirname, 'notesradar_rankings_dp.csv')
 }
 
 exportimage_musicinformation_filepath = join(export_dirname, 'musicinformation.png')
@@ -147,24 +147,45 @@ def output(notebook: NotebookSummary):
         }
     }
 
-    all_header = ['バージョン', '曲名', '難易度', 'レベル', '最終プレイ日時', 'プレイ回数', 'クリアタイプ', 'DJレベル', 'スコア', 'ミスカウント']
+    all_header = [
+        'バージョン',
+        '曲名',
+        '難易度',
+        'レベル',
+        '最終プレイ日時',
+        'プレイ回数',
+        'クリアタイプ',
+        'クリアタイプ更新オプション',
+        'DJレベル',
+        'DJレベル更新オプション',
+        'スコア',
+        'スコア更新オプション',
+        'ミスカウント',
+        'ミスカウント更新オプション',
+        '固定配置実績',
+        '固定配置クリアタイプ',
+        '固定配置DJレベル',
+        'S-RANDOM実績',
+        'S-RANDOMクリアタイプ',
+        'S-RANDOMDJレベル',
+    ]
 
     summary_keys1 = ['difficulties', 'levels']
     summary_keys2 = ['clear_types', 'dj_levels']
 
     summary = {}
     csv_output = {}
-    for play_mode in define.value_list['play_modes']:
-        summary[play_mode] = {}
-        csv_output[play_mode] = [all_header]
+    for playtype in Playtypes.values:
+        summary[playtype] = {}
+        csv_output[playtype] = [all_header]
         for summary_key1 in summary_keys1:
-            summary[play_mode][summary_key1] = {}
+            summary[playtype][summary_key1] = {}
             for key in define.value_list[summary_key1]:
-                summary[play_mode][summary_key1][key] = {}
+                summary[playtype][summary_key1][key] = {}
                 for summary_key2 in summary_keys2:
-                    summary[play_mode][summary_key1][key][summary_key2] = {}
+                    summary[playtype][summary_key1][key][summary_key2] = {}
                     for value_key in [*define.value_list[summary_key2], 'TOTAL']:
-                        summary[play_mode][summary_key1][key][summary_key2][value_key] = 0
+                        summary[playtype][summary_key1][key][summary_key2][value_key] = 0
 
     for musicname, music_item in musictable['musics'].items():
         version = music_item['version']
@@ -172,65 +193,106 @@ def output(notebook: NotebookSummary):
             notebook_target = notebook.json['musics'][musicname]
         else:
             notebook_target = None
-        for play_mode in define.value_list['play_modes']:
+        for playtype in Playtypes.values:
             for difficulty in define.value_list['difficulties']:
-                if not difficulty in music_item[play_mode].keys() or music_item[play_mode][difficulty] is None:
+                playmode = 'SP' if playtype in ('SP', 'DP BATTLE', ) else 'DP'
+                if not difficulty in music_item[playmode].keys() or music_item[playmode][difficulty] is None:
                     continue
 
-                level = music_item[play_mode][difficulty]
+                level = music_item[playmode][difficulty]
 
-                summary[play_mode]['difficulties'][difficulty]['clear_types']['TOTAL'] += 1
-                summary[play_mode]['difficulties'][difficulty]['dj_levels']['TOTAL'] += 1
-                summary[play_mode]['levels'][level]['clear_types']['TOTAL'] += 1
-                summary[play_mode]['levels'][level]['dj_levels']['TOTAL'] += 1
+                summary[playtype]['difficulties'][difficulty]['clear_types']['TOTAL'] += 1
+                summary[playtype]['difficulties'][difficulty]['dj_levels']['TOTAL'] += 1
+                summary[playtype]['levels'][level]['clear_types']['TOTAL'] += 1
+                summary[playtype]['levels'][level]['dj_levels']['TOTAL'] += 1
 
                 lines = [version, musicname, difficulty, level]
 
-                if notebook_target is None or not play_mode in notebook_target.keys() or not difficulty in notebook_target[play_mode].keys():
-                    lines.extend(['', '', '', '', '', ''])
+                if notebook_target is None or not playtype in notebook_target.keys() or not difficulty in notebook_target[playtype].keys():
+                    lines.extend(('', '', '', '', '', '', '', '', '', '', '', '','', '', '', '',))
                 else:
-                    record = notebook_target[play_mode][difficulty]
+                    record = notebook_target[playtype][difficulty]
+
                     lines.append(record['latest'] if record['latest'] is not None else '')
                     lines.append(record['playcount'] if record['playcount'] is not None else '')
-                    lines.append(record['cleartype'] if record['cleartype'] is not None else '')
-                    lines.append(record['djlevel'] if record['djlevel'] is not None else '')
-                    lines.append(record['score'] if record['score'] is not None else '')
-                    lines.append(record['misscount'] if record['misscount'] is not None else '')
 
-                    level = music_item[play_mode][difficulty]
-                    if record['cleartype'] is not None:
-                        summary[play_mode]['difficulties'][difficulty]['clear_types'][record['cleartype']] += 1
-                        summary[play_mode]['levels'][level]['clear_types'][record['cleartype']] += 1
-                    if record['djlevel'] is not None:
-                        summary[play_mode]['difficulties'][difficulty]['dj_levels'][record['djlevel']] += 1
-                        summary[play_mode]['levels'][level]['dj_levels'][record['djlevel']] += 1
+                    if 'best' in record.keys():
+                        for key in ('cleartype', 'djlevel', 'score', 'misscount',):
+                            if record['best'][key] is not None:
+                                value = record['best'][key]['value']
+                                
+                                option = None
+                                if 'options' in record['best'][key].keys() and record['best'][key]['options'] is not None:
+                                    optionvalues = [
+                                        record['best'][key]['options']['arrange'],
+                                        record['best'][key]['options']['flip'],
+                                        record['best'][key]['options']['assist'],
+                                    ]
+                                    option = ','.join([v for v in optionvalues if v is not None])
+                                    if option == '':
+                                        option = '---'
+
+                                lines.append(value if value is not None else '')
+                                lines.append(option if option is not None else '???')
+
+                            else:
+                                lines.extend(('', '',))
+
+                        if record['best']['cleartype'] is not None:
+                            value = record['best']['cleartype']['value']
+                            summary[playtype]['difficulties'][difficulty]['clear_types'][value] += 1
+                            summary[playtype]['levels'][level]['clear_types'][value] += 1
+                        if record['best']['djlevel'] is not None:
+                            value = record['best']['djlevel']['value']
+                            summary[playtype]['difficulties'][difficulty]['dj_levels'][value] += 1
+                            summary[playtype]['levels'][level]['dj_levels'][value] += 1
+                    else:
+                        lines.extend(('', '', '', '', '', '', '', '',))
+                    
+                    if 'achievement' in record.keys() and record['achievement'] is not None:
+                        for key1 in ('fixed', 'S-RANDOM',):
+                            if 'MAX' in record['achievement'][key1].keys() or 'F-COMBO & AAA' in record['achievement'][key1].keys():
+                                if 'MAX' in record['achievement'][key1].keys():
+                                    lines.append('MAX')
+                                else:
+                                    lines.append('F-COMBO & AAA')
+                            else:
+                                lines.append('')
+
+                            if key1 in record['achievement'].keys():
+                                for key2 in ('clear_type', 'dj_level',):
+                                    lines.append(record['achievement'][key1][key2] if record['achievement'][key1][key2] is not None else '')
+                            else:
+                                lines.extend(('', '',))
+                    else:
+                        lines.extend(('', '', '', '', '', '',))
                 
-                csv_output[play_mode].append(lines)
+                csv_output[playtype].append(lines)
 
-    for play_mode in define.value_list['play_modes']:
+    for playtype in Playtypes.values:
         for summary_key1 in summary_keys1:
             for summary_key2 in summary_keys2:
                 lines = [['', *define.value_list[summary_key2], 'NO DATA', 'TOTAL']]
                 for key in define.value_list[summary_key1]:
-                    total_count = summary[play_mode][summary_key1][key][summary_key2]['TOTAL']
-                    targets = [*summary[play_mode][summary_key1][key][summary_key2].values()][:-1]
+                    total_count = summary[playtype][summary_key1][key][summary_key2]['TOTAL']
+                    targets = [*summary[playtype][summary_key1][key][summary_key2].values()][:-1]
                     no_data_count = total_count - sum(targets)
                     lines.append([key, *targets, no_data_count, total_count])
-                filepath = join(export_dirname, f'{play_mode}-{summary_filenames[summary_key1][summary_key2]}.csv')
+                filepath = join(export_dirname, f'{playtype}-{summary_filenames[summary_key1][summary_key2]}.csv')
                 with open(filepath, 'w', newline='\n') as f:
                     w = writer(f)
                     w.writerows(lines)
 
-    for play_mode in define.value_list['play_modes']:
-        filepath = join(export_dirname, f'{play_mode}.csv')
+    for playtype in Playtypes.values:
+        filepath = join(export_dirname, f'{playtype}.csv')
         with open(filepath, 'w', encoding='UTF-8', newline='\n') as f:
             w = writer(f)
-            for line in csv_output[play_mode]:
+            for line in csv_output[playtype]:
                 try:
                     w.writerow(line)
                 except Exception as ex:
-                    logger.debug('エンコードに失敗', line[0])
-                    logger.debug(ex)
+                    logger.exception('エンコードに失敗', line[0])
+                    logger.exception(ex)
     
     with open(summary_timestamp_filepath, 'w') as f:
         f.write(str(datetime.now()))

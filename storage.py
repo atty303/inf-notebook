@@ -3,7 +3,6 @@ from os.path import join,exists,splitext
 import io
 from google.cloud import storage
 from google.cloud.storage import Blob
-import uuid
 from PIL import Image,ImageDraw
 from json import loads,dumps
 from uuid import uuid1
@@ -185,13 +184,13 @@ class StorageAccessor():
             force (bool): 強制アップロード
 
         Returns:
-            bool: informationsとdetails両方アップロードした
+            bool, bool: informationsをアップロードした、detailsをアップロードした
         '''
         self.connect_client()
         if self.client is None:
             return
         
-        object_name = f'{uuid.uuid1()}.png'
+        object_name = f'{uuid1()}.png'
 
         informations_trim = force
         details_trim = force
@@ -219,6 +218,8 @@ class StorageAccessor():
                 details_trim = True
             if result.details.graphtarget is None:
                 details_trim = True
+            if result.details.graphtype == 'gauge' and result.details.options is None:
+                details_trim = True
 
         if informations_trim:
             trim = image.crop(define.informations_trimarea)
@@ -230,7 +231,7 @@ class StorageAccessor():
             image_draw.rectangle(result_rivalname_fillbox, fill=0)
             Thread(target=self.upload_details, args=(object_name, trim,)).start()
         
-        return informations_trim and details_trim
+        return informations_trim, details_trim
     
     def start_uploadmusicselect(self, image):
         '''選曲画面の収集画像をアップロードする
@@ -242,7 +243,7 @@ class StorageAccessor():
         if self.client is None:
             return
         
-        object_name = f'{uuid.uuid1()}.png'
+        object_name = f'{uuid1()}.png'
 
         trim = image.crop(define.musicselect_trimarea)
         image_draw = ImageDraw.Draw(trim)
@@ -266,10 +267,13 @@ class StorageAccessor():
         if self.bucket_resources is None:
             self.connect_bucket_resources()
         if self.bucket_resources is None:
-            return False
+            return None
 
         try:
             blob = self.bucket_resources.get_blob(resourcename)
+            if blob is None:
+                return None
+            
             return str(blob.updated)
         except Exception as ex:
             logger.exception(ex)
@@ -293,7 +297,7 @@ class StorageAccessor():
         
         return True
     
-    def download_discordwebhooks(self) -> dict[dict]:
+    def download_discordwebhooks(self) -> dict[dict] | None:
         if self.bucket_discordwebhooks is None:
             self.connect_bucket_discordwebhooks()
         if self.bucket_discordwebhooks is None:
