@@ -8,7 +8,6 @@ from define import Playtypes
 from export import export_dirname
 from platform_factory import get_platform_service
 from general import get_imagevalue
-from windows import openfolder
 
 dirname_results = 'results'
 dirname_filtereds = 'filtered'

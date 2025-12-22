@@ -18,24 +18,24 @@ logger = getLogger(__name__)
 
 class WindowsGameDetector(GameDetector):
     """Windows-specific game window detection using Win32 API"""
-    
+
     # Valid INFINITAS resolutions
     VALID_RESOLUTIONS = {
         (1920, 1080),
-        (1536, 864), 
+        (1536, 864),
         (1280, 720),
         (1097, 617)
     }
-    
+
     def __init__(self):
         # Set DPI awareness
         class PROCESS_DPI_AWARENESS:
             PROCESS_DPI_UNAWARE = 0
             PROCESS_SYSTEM_DPI_AWARE = 1
             PROCESS_PER_MONITOR_DPI_AWARE = 2
-        
+
         windll.shcore.SetProcessDpiAwareness(PROCESS_DPI_AWARENESS.PROCESS_DPI_UNAWARE)
-    
+
     def _get_process_filename(self, hWnd) -> str:
         """Get executable filename for window handle"""
         pId = c_ulong()
@@ -50,74 +50,74 @@ class WindowsGameDetector(GameDetector):
         filepath = create_unicode_buffer(MAX_PATH)
         length = DWORD(MAX_PATH)
         windll.kernel32.QueryFullProcessImageNameW(pHnd, 0, pointer(filepath), pointer(length))
-        
+
         from os.path import basename
         return basename(filepath.value)
-    
+
     def find_game_window(self, title: str, executable: str) -> Optional[WindowHandle]:
         """Find game window by title and executable name"""
         enumWindowsProc = WINFUNCTYPE(c_bool, c_int, POINTER(c_int))
         handles = []
-        
+
         def foreach_window(hWnd, lParam):
             if windll.user32.IsHungAppWindow(hWnd):
                 return True
-                
+
             # Check window title
             length = windll.user32.GetWindowTextLengthW(hWnd)
             if not length:
                 return True
-                
+
             buff = create_unicode_buffer(length + 1)
             windll.user32.GetWindowTextW(hWnd, buff, length + 1)
             if buff.value != title:
                 return True
-            
+
             # Check executable name
             filename = self._get_process_filename(hWnd)
             if filename in [executable, ""]:
                 handles.append(hWnd)
             return True
-        
+
         windll.user32.EnumWindows(enumWindowsProc(foreach_window), 0)
         return handles[0] if len(handles) == 1 else None
-    
+
     def get_window_position(self, handle: WindowHandle) -> Optional[Rectangle]:
         """Get window position and size"""
         if handle == 0:
             return None
-        
+
         rect = RECT()
         windll.user32.GetWindowRect(handle, pointer(rect))
         return Rectangle(rect.left, rect.top, rect.right, rect.bottom)
-    
+
     def validate_game_resolution(self, rect: Rectangle) -> bool:
         """Check if window size matches valid INFINITAS resolutions"""
         return (rect.width, rect.height) in self.VALID_RESOLUTIONS
 
 class WindowsPlatformService(PlatformService):
     """Windows-specific platform service implementation"""
-    
+
     def prevent_multiple_instances(self, app_title: str) -> bool:
         """Check if application window already exists"""
         handle = windll.user32.FindWindowW(None, app_title)
         return handle != 0
-    
+
     def get_app_window_handle(self, app_title: str) -> Optional[int]:
         """Get application window handle"""
         handle = windll.user32.FindWindowW(None, app_title)
         return handle if handle != 0 else None
-    
+
     def show_error_dialog(self, message: str, title: str):
         """Display Windows message box"""
         MB_OK = 0x0000
         windll.user32.MessageBoxW(0, message, title, MB_OK)
-    
+
     def configure_app_window(self, handle: WindowHandle):
         """Configure Windows application window settings"""
         if handle == 0:
             return
-            
+
         # Window style constants
         WS_MAXIMIZEBOX = 0x10000
         WS_THICKFRAME = 0x40000
@@ -141,9 +141,9 @@ class WindowsPlatformService(PlatformService):
         windll.user32.DrawMenuBar(handle)
 
         # Apply changes
-        windll.user32.SetWindowPos(handle, None, 0, 0, 0, 0, 
+        windll.user32.SetWindowPos(handle, None, 0, 0, 0, 0,
                                   SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
-    
+
     def open_folder_in_explorer(self, path: str) -> bool:
         """Open folder in Windows Explorer"""
         try:
@@ -152,51 +152,53 @@ class WindowsPlatformService(PlatformService):
         except Exception as ex:
             logger.error(f'Failed to open folder: {ex}')
             return False
-    
+
     def get_config_directory(self) -> WindowsPath:
         """Get Windows AppData roaming directory"""
         path_str = environ.get('AppData')
         if not path_str or not exists(path_str):
             raise RuntimeError('AppData directory not found')
-        
+
         path = WindowsPath(path_str)
         productpath = path.joinpath(productname)
         if not productpath.exists():
             productpath.mkdir(parents=True)
-        
+
         return productpath
-    
+
     def get_cache_directory(self) -> WindowsPath:
         """Get Windows AppData local directory"""
         path_str = environ.get('LocalAppData')
         if not path_str or not exists(path_str):
             raise RuntimeError('LocalAppData directory not found')
-        
+
         path = WindowsPath(path_str)
         productpath = path.joinpath(productname)
         if not productpath.exists():
             productpath.mkdir(parents=True)
-        
+
         return productpath
-    
+
     def absolute_path(self, path_str: str) -> WindowsPath:
         """Create Windows-specific absolute Path object"""
         return WindowsPath(path_str).absolute()
-    
+
     def create_game_detector(self) -> Optional[GameDetector]:
         """Create Windows game detector"""
         return WindowsGameDetector()
-    
-    def register_hotkeys(self, hotkey_config: dict, callbacks: dict) -> bool:
+
+    def register_hotkeys(self, bindings: dict) -> bool:
         """Register Windows global hotkeys using keyboard library"""
         try:
-            import keyboard
-            
-            for hotkey_name, hotkey_key in hotkey_config.items():
-                if hotkey_key and hotkey_name in callbacks:
-                    keyboard.add_hotkey(hotkey_key, callbacks[hotkey_name])
-            
+            from global_hotkeys import register_hotkeys,clear_hotkeys,start_checking_hotkeys
+            register_hotkeys([*bindings.values()])
+            start_checking_hotkeys()
             return True
         except Exception as ex:
             logger.error(f'Failed to register hotkeys: {ex}')
-            return False
+            raise ex
+
+    def clear_hotkeys(self):
+        """Clear Windows global hotkeys using keyboard library"""
+        from global_hotkeys import clear_hotkeys
+        clear_hotkeys()

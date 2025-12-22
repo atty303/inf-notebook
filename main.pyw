@@ -1,4 +1,3 @@
-from global_hotkeys import register_hotkeys,clear_hotkeys,start_checking_hotkeys
 import time
 from threading import Thread,Event
 from queue import Queue,Full
@@ -65,7 +64,6 @@ from export import (
 )
 from platform_factory import get_platform_service
 from export import output as output_summary
-from windows import find_window,get_rect,check_rectsize,gethandle,show_messagebox,change_window_setting
 import image
 from image import (
     generate_scoretype,
@@ -523,7 +521,7 @@ class Hotkeys():
 
     def start(self) -> bool:
         try:
-            register_hotkeys([*self.bindings.values()])
+            platform_service.register_hotkeys(self.bindings)
         except Exception as ex:
             messages = [
                 '現在ショートカットキーが全て無効です。',
@@ -534,11 +532,10 @@ class Hotkeys():
             logger.error(ex)
             return False
 
-        start_checking_hotkeys()
         return True
 
     def stop(self):
-        clear_hotkeys()
+        platform_service.clear_hotkeys()
 
 class GuiApi():
     '''メイン画面のAPIクラス
